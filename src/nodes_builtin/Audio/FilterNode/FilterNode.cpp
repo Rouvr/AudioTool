@@ -120,33 +120,35 @@ struct FilterState {
     }
 };
 
-AT_NodeInstance* AT_CDECL flt_create_instance(const AT_HostServices* host, uint32_t runtime_node_id) {
+AT_NodeHandle AT_CDECL flt_create_instance(const AT_HostServices* host, uint32_t runtime_node_id) {
     auto* s = new FilterState();
     s->host = host;
     s->runtime_node_id = runtime_node_id;
     s->init_descriptors();
     s->update_coefficients();
-    return reinterpret_cast<AT_NodeInstance*>(s);
+    return reinterpret_cast<AT_NodeHandle>(s);
 }
 
-void AT_CDECL flt_destroy_instance(AT_NodeInstance* instance) {
-    delete reinterpret_cast<FilterState*>(instance);
+void AT_CDECL flt_destroy_instance(AT_NodeHandle handle) {
+    if (!handle) return;
+    delete reinterpret_cast<FilterState*>(handle);
 }
 
-uint32_t AT_CDECL flt_get_controls(AT_NodeInstance* instance, const AT_ControlDescriptor** out_descriptors) {
-    auto* s = reinterpret_cast<FilterState*>(instance);
-    if (out_descriptors) *out_descriptors = s->cached_controls.data();
-    return static_cast<uint32_t>(s->cached_controls.size());
+const AT_ControlDescriptor* AT_CDECL flt_get_controls(AT_NodeHandle handle, uint32_t* out_count) {
+    if (!handle) return nullptr;
+    auto* s = reinterpret_cast<FilterState*>(handle);
+    if (out_count) *out_count = static_cast<uint32_t>(s->cached_controls.size());
+    return s->cached_controls.data();
 }
 
-uint32_t AT_CDECL flt_get_functions(AT_NodeInstance*, const AT_FunctionDescriptor** out_descriptors) {
-    if (out_descriptors) *out_descriptors = nullptr;
-    return 0;
+const AT_FunctionDescriptor* AT_CDECL flt_get_functions(AT_NodeHandle, uint32_t* out_count) {
+    if (out_count) *out_count = 0;
+    return nullptr;
 }
 
-AT_Result AT_CDECL flt_get_control_value(AT_NodeInstance* instance, uint32_t control_id, AT_ControlValue* out_value) {
-    if (!instance || !out_value) return AT_ERR_INVALID_ARG;
-    auto* s = reinterpret_cast<FilterState*>(instance);
+AT_Result AT_CDECL flt_get_control_value(AT_NodeHandle handle, uint32_t control_id, AT_ControlValue* out_value) {
+    if (!handle || !out_value) return AT_ERR_INVALID_ARG;
+    auto* s = reinterpret_cast<FilterState*>(handle);
     switch (control_id) {
     case CTRL_BYPASS:
         out_value->type = AT_VAL_BOOL; out_value->bool_val = s->bypass; return AT_OK;
@@ -165,9 +167,9 @@ AT_Result AT_CDECL flt_get_control_value(AT_NodeInstance* instance, uint32_t con
     }
 }
 
-AT_Result AT_CDECL flt_set_control_value(AT_NodeInstance* instance, uint32_t control_id, const AT_ControlValue* in_value) {
-    if (!instance || !in_value) return AT_ERR_INVALID_ARG;
-    auto* s = reinterpret_cast<FilterState*>(instance);
+AT_Result AT_CDECL flt_set_control_value(AT_NodeHandle handle, uint32_t control_id, const AT_ControlValue* in_value) {
+    if (!handle || !in_value) return AT_ERR_INVALID_ARG;
+    auto* s = reinterpret_cast<FilterState*>(handle);
     switch (control_id) {
     case CTRL_BYPASS:
         s->bypass = in_value->bool_val; return AT_OK;
@@ -192,8 +194,9 @@ AT_Result AT_CDECL flt_set_control_value(AT_NodeInstance* instance, uint32_t con
     }
 }
 
-AT_Result AT_CDECL flt_prepare_audio(AT_NodeInstance* instance, uint32_t sample_rate, uint32_t) {
-    auto* s = reinterpret_cast<FilterState*>(instance);
+AT_Result AT_CDECL flt_prepare_audio(AT_NodeHandle handle, uint32_t sample_rate, uint32_t, uint32_t) {
+    if (!handle) return AT_ERR_INVALID_ARG;
+    auto* s = reinterpret_cast<FilterState*>(handle);
     s->sample_rate = sample_rate > 0 ? sample_rate : 48000;
     s->smoothed_gain.prepare(s->sample_rate, 5.0f);
     s->smoothed_gain.set_immediate(at::db_to_linear(static_cast<float>(s->output_gain_db)));
@@ -203,8 +206,9 @@ AT_Result AT_CDECL flt_prepare_audio(AT_NodeInstance* instance, uint32_t sample_
     return AT_OK;
 }
 
-void AT_CDECL flt_process_audio(AT_NodeInstance* instance, AT_AudioProcessContext* ctx) {
-    auto* s = reinterpret_cast<FilterState*>(instance);
+void AT_CDECL flt_process_audio(AT_NodeHandle handle, const AT_AudioProcessContext* ctx) {
+    if (!handle || !ctx) return;
+    auto* s = reinterpret_cast<FilterState*>(handle);
     const uint32_t frames = ctx->num_frames;
     const uint32_t channels = ctx->output_bus.num_channels;
 
