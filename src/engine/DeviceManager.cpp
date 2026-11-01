@@ -197,7 +197,10 @@ std::vector<AudioDeviceInfo> DeviceManager::enumerate_devices() const {
     std::vector<AudioDeviceInfo> list;
     const uint32_t sr = sample_rate_.load();
 
-    // Deterministic virtual endpoints for automated self-testing
+    // Deterministic virtual endpoints & default aliases
+    list.push_back(AudioDeviceInfo{"default_input", "Default Windows Microphone (Capture)", true, false, true, sr, 2});
+    list.push_back(AudioDeviceInfo{"default_output", "Default Windows Playback (Render)", false, true, true, sr, 2});
+    list.push_back(AudioDeviceInfo{"default_loopback", "System Audio Loopback (Default Output)", true, false, false, sr, 2});
     list.push_back(AudioDeviceInfo{"virtual://test_input", "Virtual Test Input (Synthetic Source)", true, false, false, sr, 2});
     list.push_back(AudioDeviceInfo{"virtual://test_output", "Virtual Test Output (Synthetic Sink)", false, true, false, sr, 2});
 
@@ -271,6 +274,16 @@ std::vector<AudioDeviceInfo> DeviceManager::enumerate_devices() const {
                 info.is_default         = (!default_id.empty() && dev_id_w == default_id);
                 info.native_sample_rate = native_sr;
                 info.native_channels    = native_ch;
+
+                if (!is_input) {
+                    AudioDeviceInfo loop_info = info;
+                    loop_info.endpoint_id      = std::string(AT_LOOPBACK_PREFIX) + info.endpoint_id;
+                    loop_info.friendly_name    = "[Loopback] " + friendly;
+                    loop_info.is_input_capture = true;
+                    loop_info.is_output_render = false;
+                    list.push_back(std::move(loop_info));
+                }
+
                 list.push_back(std::move(info));
 
                 dev->Release();

@@ -47,7 +47,7 @@ std::string OpenProfileFileDialog(HWND hWnd, bool is_save) {
     ofn.lpstrFile = filename;
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrDefExt = L"atprof";
-    ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
+    ofn.Flags = OFN_EXPLORER | OFN_HIDEREADONLY | (is_save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
 
     std::wstring init_dir = at::AppPathsAndRegistry::get_profiles_dir().wstring();
     ofn.lpstrInitialDir = init_dir.c_str();
@@ -79,17 +79,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
 
     // Spawn default nodes: Virtual Input -> Volume Mixer -> Output
     if (cur_profile) {
-        uint32_t vin = cur_profile->spawn_node("at.builtin.audio.virtual_input", "Microphone");
-        uint32_t vol = cur_profile->spawn_node("at.builtin.audio.volume", "Volume Mixer");
+        uint32_t vin  = cur_profile->spawn_node("at.builtin.audio.virtual_input", "Microphone");
+        uint32_t vol  = cur_profile->spawn_node("at.builtin.audio.volume", "Volume Mixer");
         uint32_t vout = cur_profile->spawn_node("at.builtin.audio.output", "Speakers / Cable");
-        uint32_t tmr = cur_profile->spawn_node("at.builtin.control.timer", "Periodic Pulse");
+        uint32_t tmr  = cur_profile->spawn_node("at.builtin.control.timer", "Periodic Pulse");
 
-        if (vin) cur_profile->set_node_ui(vin, {100.0f, 120.0f, true});
-        if (vol) cur_profile->set_node_ui(vol, {460.0f, 120.0f, true});
-        if (vout) cur_profile->set_node_ui(vout, {820.0f, 120.0f, true});
-        if (tmr) cur_profile->set_node_ui(tmr, {100.0f, 380.0f, true});
+        if (vin)  cur_profile->set_node_ui(vin,  { 60.0f,  80.0f, true});
+        if (vol)  cur_profile->set_node_ui(vol,  {430.0f,  60.0f, true});
+        if (vout) cur_profile->set_node_ui(vout, {830.0f,  80.0f, true});
+        if (tmr)  cur_profile->set_node_ui(tmr,  { 60.0f, 340.0f, true});
 
-        if (vin && vol) cur_profile->connect_audio(vin, vol);
+        if (vin && vol)  cur_profile->connect_audio(vin, vol);
         if (vol && vout) cur_profile->connect_audio(vol, vout);
     }
 
@@ -99,7 +99,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     // 2. Win32 Application Window setup
     WNDCLASSEXW wc = { sizeof(wc), CS_CLASSDC, WndProc, 0L, 0L, hInstance, nullptr, nullptr, nullptr, nullptr, L"AudioToolMainWindowClass", nullptr };
     RegisterClassExW(&wc);
-    HWND hwnd = CreateWindowW(wc.lpszClassName, L"Rouvr AudioTool", WS_OVERLAPPEDWINDOW, 100, 100, 1280, 800, nullptr, nullptr, wc.hInstance, nullptr);
+    HWND hwnd = CreateWindowW(wc.lpszClassName, L"Rouvr AudioTool", WS_OVERLAPPEDWINDOW, 80, 60, 1360, 820, nullptr, nullptr, wc.hInstance, nullptr);
 
     if (!CreateDeviceD3D(hwnd)) {
         CleanupDeviceD3D();
@@ -128,6 +128,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     at::CanvasRenderer canvas_renderer;
 
     uint32_t active_profile_id = cur_profile ? cur_profile->id() : 1;
+    uint32_t pending_select_profile_id = active_profile_id;
     bool show_settings_modal = false;
 
     // 4. Main Event Loop
@@ -153,6 +154,50 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
 
+        // Global Keyboard Shortcuts (when not typing in a text box)
+        if (!io.WantTextInput) {
+            if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_N, false)) {
+                auto* p = engine.create_profile("New Profile");
+                if (p) {
+                    active_profile_id = p->id();
+                    pending_select_profile_id = p->id();
+                }
+            }
+            if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_O, false)) {
+                std::string fpath = OpenProfileFileDialog(hwnd, false);
+                if (!fpath.empty()) {
+                    std::string load_err;
+                    auto* p = engine.load_profile(fpath, &load_err);
+                    if (p) {
+                        active_profile_id = p->id();
+                        pending_select_profile_id = p->id();
+                    } else {
+                        MessageBoxA(hwnd, load_err.c_str(), "Failed to Load Profile", MB_ICONWARNING);
+                    }
+                }
+            }
+            if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false)) {
+                auto* p = engine.find_profile(active_profile_id);
+                if (p) {
+                    std::string fpath = io.KeyShift ? "" : p->metadata().file_path;
+                    if (fpath.empty()) fpath = OpenProfileFileDialog(hwnd, true);
+                    if (!fpath.empty()) {
+                        std::string save_err;
+                        if (!engine.save_profile(active_profile_id, fpath, &save_err)) {
+                            MessageBoxA(hwnd, save_err.c_str(), "Failed to Save", MB_ICONWARNING);
+                        }
+                    }
+                }
+            }
+            if (!io.KeyCtrl && !io.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_Tab, false)) {
+                if (auto* p = engine.find_profile(active_profile_id)) {
+                    at::ProfileMetadata m = p->metadata();
+                    std::string next_view = (m.active_plane_view == "AUDIO") ? "CONTROL" : "AUDIO";
+                    p->set_canvas_state(m.canvas_pan_x, m.canvas_pan_y, next_view, m.canvas_zoom);
+                }
+            }
+        }
+
         // Top Fullscreen Host Window
         ImGuiViewport* viewport = ImGui::GetMainViewport();
         ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -162,9 +207,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
 
         ImGuiWindowFlags host_flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse |
-                                     ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-                                     ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus |
-                                     ImGuiWindowFlags_MenuBar;
+                                      ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                                      ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus |
+                                      ImGuiWindowFlags_MenuBar;
 
         ImGui::Begin("AudioToolMainHost", nullptr, host_flags);
         ImGui::PopStyleVar(3);
@@ -174,15 +219,22 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
             if (ImGui::BeginMenu("File")) {
                 if (ImGui::MenuItem("New Profile Tab", "Ctrl+N")) {
                     auto* p = engine.create_profile("New Profile");
-                    if (p) active_profile_id = p->id();
+                    if (p) {
+                        active_profile_id = p->id();
+                        pending_select_profile_id = p->id();
+                    }
                 }
                 if (ImGui::MenuItem("Load Profile...", "Ctrl+O")) {
                     std::string fpath = OpenProfileFileDialog(hwnd, false);
                     if (!fpath.empty()) {
                         std::string load_err;
                         auto* p = engine.load_profile(fpath, &load_err);
-                        if (p) active_profile_id = p->id();
-                        else MessageBoxA(hwnd, load_err.c_str(), "Failed to Load Profile", MB_ICONWARNING);
+                        if (p) {
+                            active_profile_id = p->id();
+                            pending_select_profile_id = p->id();
+                        } else {
+                            MessageBoxA(hwnd, load_err.c_str(), "Failed to Load Profile", MB_ICONWARNING);
+                        }
                     }
                 }
                 if (ImGui::MenuItem("Save Profile", "Ctrl+S")) {
@@ -218,31 +270,35 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
                 if (ImGui::MenuItem("Engine Settings...")) {
                     show_settings_modal = true;
                 }
+                if (ImGui::MenuItem("Refresh Audio Devices")) {
+                    canvas_renderer.invalidate_device_cache();
+                }
                 if (ImGui::MenuItem("Rescan Plugins Folder")) {
                     std::vector<std::string> errs;
                     size_t loaded = engine.rescan_plugins(&errs);
+                    canvas_renderer.invalidate_device_cache();
                     std::string rescan_msg = "Plugins reloaded: " + std::to_string(loaded);
                     MessageBoxA(hwnd, rescan_msg.c_str(), "Plugin Scan", MB_ICONINFORMATION);
                 }
                 ImGui::EndMenu();
             }
 
-            // Right-aligned view switcher: [ Audio Stream View | Data View ]
+            // Right-aligned view switcher: [ Audio Stream View | Control / Data View ]
             float menu_w = ImGui::GetWindowWidth();
             auto* cur_prof = engine.find_profile(active_profile_id);
             if (cur_prof) {
                 at::ProfileMetadata m = cur_prof->metadata();
                 bool is_audio = (m.active_plane_view == "AUDIO");
 
-                ImGui::SetCursorPosX(menu_w - 300.0f);
-                ImGui::TextUnformatted("View:");
+                ImGui::SetCursorPosX(std::max(240.0f, menu_w - 330.0f));
+                ImGui::TextUnformatted("Plane (Tab):");
                 ImGui::SameLine();
                 if (ImGui::RadioButton("Audio Stream", is_audio)) {
-                    cur_prof->set_canvas_state(m.canvas_pan_x, m.canvas_pan_y, "AUDIO");
+                    cur_prof->set_canvas_state(m.canvas_pan_x, m.canvas_pan_y, "AUDIO", m.canvas_zoom);
                 }
                 ImGui::SameLine();
                 if (ImGui::RadioButton("Control / Data", !is_audio)) {
-                    cur_prof->set_canvas_state(m.canvas_pan_x, m.canvas_pan_y, "CONTROL");
+                    cur_prof->set_canvas_state(m.canvas_pan_x, m.canvas_pan_y, "CONTROL", m.canvas_zoom);
                 }
             }
 
@@ -253,57 +309,111 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         auto prof_ids = engine.profile_ids();
         if (prof_ids.empty()) {
             auto* p = engine.create_profile("Profile 1");
-            if (p) active_profile_id = p->id();
+            if (p) {
+                active_profile_id = p->id();
+                pending_select_profile_id = p->id();
+            }
             prof_ids = engine.profile_ids();
         }
 
+        uint32_t tab_to_close = 0;
         if (ImGui::BeginTabBar("ProfileTabs", ImGuiTabBarFlags_AutoSelectNewTabs)) {
             for (uint32_t pid : prof_ids) {
                 auto* prof = engine.find_profile(pid);
                 if (!prof) continue;
 
-                std::string tab_label = prof->metadata().name + "##tab_" + std::to_string(pid);
+                bool is_prof_active = prof->is_active();
+                std::string prefix = is_prof_active ? "[ON] " : "[PAUSED] ";
+                std::string tab_label = prefix + prof->metadata().name + "##tab_" + std::to_string(pid);
                 bool open = true;
-                if (ImGui::BeginTabItem(tab_label.c_str(), &open)) {
-                    active_profile_id = pid;
+
+                ImGuiTabItemFlags tab_flags = 0;
+                if (pending_select_profile_id == pid) {
+                    tab_flags |= ImGuiTabItemFlags_SetSelected;
+                }
+
+                if (ImGui::BeginTabItem(tab_label.c_str(), &open, tab_flags)) {
+                    if (pending_select_profile_id == 0 || pending_select_profile_id == pid) {
+                        active_profile_id = pid;
+                    }
                     ImGui::EndTabItem();
                 }
+
+                // Right-click context menu on tab to toggle profile active/paused state
+                if (ImGui::BeginPopupContextItem()) {
+                    if (ImGui::MenuItem(is_prof_active ? "Pause Profile Processing" : "Resume Profile Processing")) {
+                        prof->set_active(!is_prof_active);
+                    }
+                    ImGui::EndPopup();
+                }
+
                 if (!open) {
-                    engine.close_profile(pid);
+                    tab_to_close = pid;
                 }
             }
+            pending_select_profile_id = 0;
 
             if (ImGui::TabItemButton("+##add_tab")) {
                 auto* p = engine.create_profile("New Profile");
-                if (p) active_profile_id = p->id();
+                if (p) {
+                    active_profile_id = p->id();
+                    pending_select_profile_id = p->id();
+                }
             }
             ImGui::EndTabBar();
         }
 
-        // Main Visual Editing Canvas
-        auto* active_prof = engine.find_profile(active_profile_id);
-        if (active_prof) {
-            canvas_renderer.render(*active_prof, engine);
+        if (tab_to_close != 0) {
+            engine.close_profile(tab_to_close);
+            auto remaining = engine.profile_ids();
+            if (!remaining.empty()) {
+                active_profile_id = remaining.front();
+                pending_select_profile_id = active_profile_id;
+            }
         }
 
-        // Status Bar at the bottom
+        // Main Visual Editing Canvas (reserves 28 px at bottom for status bar)
+        constexpr float kStatusBarHeight = 28.0f;
+        auto* active_prof = engine.find_profile(active_profile_id);
+        if (active_prof) {
+            canvas_renderer.render(*active_prof, engine, kStatusBarHeight);
+        }
+
+        // Bottom Status Bar
         at::EngineStats stats = engine.stats();
-        ImGui::SetCursorPos(ImVec2(10.0f, ImGui::GetWindowHeight() - 24.0f));
-        ImGui::Text("Engine: %s | Sample Rate: %d Hz | Buffer: %d smp | DSP Load: %.1f%% | Open Devices: %zu",
+        ImDrawList* host_dl = ImGui::GetWindowDrawList();
+        ImVec2 win_pos = ImGui::GetWindowPos();
+        ImVec2 win_sz  = ImGui::GetWindowSize();
+        ImVec2 sb_min(win_pos.x, win_pos.y + win_sz.y - kStatusBarHeight);
+        ImVec2 sb_max(win_pos.x + win_sz.x, win_pos.y + win_sz.y);
+        host_dl->AddRectFilled(sb_min, sb_max, IM_COL32(18, 20, 24, 255));
+        host_dl->AddLine(sb_min, ImVec2(sb_max.x, sb_min.y), IM_COL32(48, 52, 62, 255), 1.0f);
+
+        ImGui::SetCursorScreenPos(ImVec2(sb_min.x + 12.0f, sb_min.y + 5.0f));
+        ImGui::Text("Engine: %s | Sample Rate: %u Hz | Buffer: %u smp (%.1f ms) | DSP Load: %.1f%% | Active Devices: %zu | Build: %s",
                     stats.running ? "Running" : "Stopped",
                     engine.config().sample_rate,
                     engine.config().buffer_size_frames,
+                    (1000.0 * engine.config().buffer_size_frames) / std::max(1u, engine.config().sample_rate),
                     stats.dsp_load * 100.0f,
-                    stats.open_devices);
+                    stats.open_devices,
+                    AT_BUILD_ID);
 
         // Engine Settings Modal Dialog
         if (show_settings_modal) {
             ImGui::OpenPopup("Engine Settings");
+            show_settings_modal = false;
         }
         if (ImGui::BeginPopupModal("Engine Settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
             static int sel_sr = static_cast<int>(engine.config().sample_rate);
             static int sel_bs = static_cast<int>(engine.config().buffer_size_frames);
             static int sel_mc = static_cast<int>(engine.config().max_connections_per_port);
+
+            if (ImGui::IsWindowAppearing()) {
+                sel_sr = static_cast<int>(engine.config().sample_rate);
+                sel_bs = static_cast<int>(engine.config().buffer_size_frames);
+                sel_mc = static_cast<int>(engine.config().max_connections_per_port);
+            }
 
             ImGui::Text("Runtime Audio Parameters (safe live reload):");
             ImGui::Separator();
@@ -331,12 +441,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
                 new_cfg.max_connections_per_port = static_cast<uint32_t>(sel_mc);
                 engine.reload_config(new_cfg);
                 at::AudioEngine::save_config_file(new_cfg);
-                show_settings_modal = false;
+                canvas_renderer.invalidate_device_cache();
                 ImGui::CloseCurrentPopup();
             }
             ImGui::SameLine();
             if (ImGui::Button("Cancel", ImVec2(100, 0))) {
-                show_settings_modal = false;
                 ImGui::CloseCurrentPopup();
             }
             ImGui::EndPopup();

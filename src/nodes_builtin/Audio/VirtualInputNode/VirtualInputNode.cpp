@@ -43,7 +43,7 @@ struct VirtualInputNodeState {
             dev_stream = nullptr;
         }
         if (!device_id.empty() && host->acquire_hardware_device) {
-            const bool is_loopback = (device_id == "default_loopback");
+            const bool is_loopback = (device_id == "default_loopback" || device_id.rfind(AT_LOOPBACK_PREFIX, 0) == 0);
             dev_stream = host->acquire_hardware_device(
                 host->host_context,
                 device_id.c_str(),

@@ -65,7 +65,7 @@ public:
     void            set_metadata(const ProfileMetadata& meta);
     void            set_name(const std::string& name);
     void            set_file_path(const std::string& path);
-    void            set_canvas_state(float pan_x, float pan_y, const std::string& plane_view);
+    void            set_canvas_state(float pan_x, float pan_y, const std::string& plane_view, float zoom = 0.0f);
     bool            is_active() const;
     void            set_active(bool active);
 

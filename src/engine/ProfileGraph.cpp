@@ -150,11 +150,14 @@ void ProfileGraph::set_file_path(const std::string& path) {
     meta_.file_path = path;
 }
 
-void ProfileGraph::set_canvas_state(float pan_x, float pan_y, const std::string& plane_view) {
+void ProfileGraph::set_canvas_state(float pan_x, float pan_y, const std::string& plane_view, float zoom) {
     Lock lock(engine_.mutex());
     meta_.canvas_pan_x      = pan_x;
     meta_.canvas_pan_y      = pan_y;
     meta_.active_plane_view = plane_view;
+    if (zoom > 0.05f) {
+        meta_.canvas_zoom = zoom;
+    }
 }
 
 bool ProfileGraph::is_active() const {
