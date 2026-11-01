@@ -56,7 +56,7 @@ private:
     std::function<bool(const std::string&)>                         can_replace_;
     mutable std::mutex                                              mutex_;
     std::unordered_map<std::string, std::unique_ptr<RegisteredPlugin>> plugins_;
-    uint64_t                                                        shadow_counter_ = 0;
+    inline static std::atomic<uint64_t>                             shadow_counter_{0};
 };
 
 } // namespace at
