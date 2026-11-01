@@ -6,6 +6,6 @@
 // ============================================================================
 
 #define AT_VERSION_STRING      "0.1.0"
-#define AT_BUILD_ID            "BLD-20261101-131019-0C96AD30"
-#define AT_BUILD_TIMESTAMP_UTC "2026-11-01T13:10:19Z"
-#define AT_GIT_COMMIT_HASH     "d753069"
+#define AT_BUILD_ID            "BLD-20261101-133829-8FFDF3C0"
+#define AT_BUILD_TIMESTAMP_UTC "2026-11-01T13:38:29Z"
+#define AT_GIT_COMMIT_HASH     "75ee27c"

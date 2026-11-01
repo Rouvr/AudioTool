@@ -768,7 +768,24 @@ bool CanvasRenderer::render_nodes(
                     }
                 } else if (ctrl.control_type == AT_CTRL_RANGE_TEXT_INPUT || ctrl.control_type == AT_CTRL_VALUE_TEXT_INPUT) {
                     ImGui::SetNextItemWidth(widget_w);
-                    if (ctrl.value_type == AT_VAL_INT) {
+                    if (ctrl.predefined_count > 0 && ctrl.predefined_values != nullptr) {
+                        int idx = (ctrl.value_type == AT_VAL_INT) ? static_cast<int>(ctrl.value.int_val) : 0;
+                        const char* preview = (idx >= 0 && idx < static_cast<int>(ctrl.predefined_count)) ? ctrl.predefined_values[idx] : "Select...";
+                        if (ImGui::BeginCombo("##combomenu", preview)) {
+                            for (uint32_t i = 0; i < ctrl.predefined_count; ++i) {
+                                bool is_sel = (idx == static_cast<int>(i));
+                                if (ImGui::Selectable(ctrl.predefined_values[i], is_sel)) {
+                                    if (ctrl.value_type == AT_VAL_INT) {
+                                        profile.set_control(node.node_id, ctrl.control_id, OwnedValue::make_int(i));
+                                    }
+                                }
+                                if (is_sel) {
+                                    ImGui::SetItemDefaultFocus();
+                                }
+                            }
+                            ImGui::EndCombo();
+                        }
+                    } else if (ctrl.value_type == AT_VAL_INT) {
                         int ival = static_cast<int>(ctrl.value.int_val);
                         int step = std::max(1, static_cast<int>(ctrl.step_value));
                         if (ImGui::InputInt("##int_in", &ival, step, step * 5)) {
