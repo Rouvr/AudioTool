@@ -195,11 +195,26 @@ As specified in requirements, nodes feature dual representation:
   - Saved control parameter values (volume levels, device selections, mute states).
   - Audio and Control wiring topology.
 
+### 3.5 UI Architecture Audit & Resolved Pitfalls
+1. **Input Hit-Testing & Widget Focus Arbitration (`CanvasViewport`)**:
+   - *Pitfall / Bug*: Placing a full-screen `ImGui::InvisibleButton("CanvasHitBox", ..., ImGuiButtonFlags_MouseButtonLeft)` at the start of `CanvasRenderer::render()` without overlap flags caused `CanvasHitBox` to claim `g.HoveredId` and `g.ActiveId` before any node controls (`SliderFloat`, `Button`, `BeginCombo`, `InputInt`, `InputFloat`) were evaluated, blocking all mouse clicks on node controls.
+   - *Fix*: Replaced the pre-frame `InvisibleButton` with a hardware-scissored `ImGui::BeginChild("CanvasViewport")` that evaluates node widgets and wire/snap hitboxes first, only panning the canvas background when no node widget or port is hovered/active.
+2. **Explicit Per-Row Horizontal & Vertical Cursor Anchoring**:
+   - *Pitfall / Bug*: Calling `ImGui::SetCursorScreenPos()` only once before the `for (const auto& ctrl : node.controls)` loop caused Dear ImGui to reset `CursorPos.x` to the left edge of the parent window (`x = 0`) after the first row's widget completed, causing rows `1..N` to snap to the left edge of the window.
+   - *Fix*: Implemented a two-column table layout (`NodeLayoutMetrics`) where every row `r` explicitly positions its left label cell (`screen_min.x + 10 * zoom`) and explicitly calls `ImGui::SetCursorScreenPos(ImVec2(widget_x, widget_y))` before rendering its right control cell.
+3. **Unified Node Layout Metrics (`compute_node_layout`)**:
+   - Both `render_connections()` and `render_nodes()` share a single layout measurement pass that dynamically widens each node rectangle to fit its widest header or control row (`Keep the width of the widest element`) and guarantees pixel-exact alignment between snap dots and wire endpoints.
+4. **Latched Node Dragging & Dual-Mode Wire Connection**:
+   - Added persistent `NodeDragState` so fast mouse movements never drop a dragged node and passing over another node never drags both.
+   - Upgraded `WireDragState` and `FunctionPickerPopupState` to support both **Press-and-Drag** and **Click-then-Click** wire creation in either direction (`Output -> Input` or `Input -> Output`).
+5. **Cached Hardware Device Enumeration**:
+   - Cached `DeviceManager::enumerate_devices()` inside `CanvasRenderer` (refreshing on startup, when opening a device combo box, or on manual refresh) instead of querying WASAPI COM interfaces on every GUI frame.
+
 ---
 
 ## 4. Verification & Automated Test Status
 
-All 6 automated tests pass cleanly (`ctest` and `at_poc_tests.exe`):
+All 7 automated tests pass cleanly (`ctest` and `at_poc_tests.exe`):
 
 | Test | Description | Result |
 |------|-------------|:------:|
@@ -209,6 +224,7 @@ All 6 automated tests pass cleanly (`ctest` and `at_poc_tests.exe`):
 | **Test 4** | Control Plane `TimerNode` pulse -> `VirtualInputNode::toggle_mute` | **PASSED** |
 | **Test 5** | Runtime buffer size reload (256 -> 512) & WASAPI enumeration | **PASSED** |
 | **Test 6** | `VolumeNode` multi-channel mixing, auto-normalization, and mute | **PASSED** |
+| **Test 7** | Headless GUI `CanvasRenderer` row alignment & control click/slider interaction | **PASSED** |
 
 ---
 
