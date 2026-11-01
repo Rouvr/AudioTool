@@ -573,55 +573,54 @@ bool test_10_additional_audio_processing_nodes() {
     }
     std::cout << "  -> Discovered and loaded all 15 plugins across Audio & Control planes.\n";
 
-    // 2. Test Limiter Hard Ceiling Clamping
+    // 2. Test Limiter Hard Ceiling Clamping via Virtual Audio Loop
     {
-        uint32_t lim_id = engine.spawn_node("at.builtin.audio.limiter", "Test Limiter", &err);
-        TEST_ASSERT(lim_id != 0, "Failed to spawn LimiterNode");
+        at::AudioGraphEngine eng;
+        TEST_ASSERT(eng.initialize(cfg, &err), "Engine init failed");
 
-        // Set ceiling to -6.0 dB (approx 0.501) and pre-gain to +6.0 dB
+        uint32_t in_n  = eng.spawn_node("at.builtin.audio.virtual_input", "In", &err);
+        uint32_t lim_n = eng.spawn_node("at.builtin.audio.limiter", "Lim", &err);
+        uint32_t out_n = eng.spawn_node("at.builtin.audio.output", "Out", &err);
+        TEST_ASSERT(in_n && lim_n && out_n, "Failed to spawn nodes");
+
+        AT_ControlValue in_dev{ AT_VAL_STRING, { .string_val = "virtual://test_lim_in" } };
+        AT_ControlValue out_dev{ AT_VAL_STRING, { .string_val = "virtual://test_lim_out" } };
+        eng.set_node_control_by_identifier(in_n, "device_id", in_dev);
+        eng.set_node_control_by_identifier(out_n, "device_id", out_dev);
+
+        // Ceiling = -6.0 dB (0.501), Pre-Gain = +6.0 dB
         AT_ControlValue ceil_val{ AT_VAL_FLOAT, { .float_val = -6.0 } };
         AT_ControlValue pre_val{ AT_VAL_FLOAT, { .float_val = 6.0 } };
-        TEST_ASSERT(engine.set_node_control_by_identifier(lim_id, "ceiling_db", ceil_val) == AT_OK, "Failed to set ceiling");
-        TEST_ASSERT(engine.set_node_control_by_identifier(lim_id, "input_gain_db", pre_val) == AT_OK, "Failed to set pre_gain");
+        eng.set_node_control_by_identifier(lim_n, "ceiling_db", ceil_val);
+        eng.set_node_control_by_identifier(lim_n, "input_gain_db", pre_val);
 
-        // Process audio with 1.0 peak input
-        const auto* lim_node = engine.active_profile().find_node(lim_id);
-        TEST_ASSERT(lim_node != nullptr, "Limiter node missing in profile");
+        eng.connect_audio(in_n, lim_n);
+        eng.connect_audio(lim_n, out_n);
 
-        at::AlignedPlanarBuffer in_buf(2, 256);
-        at::AlignedPlanarBuffer out_buf(2, 256);
+        at::AlignedPlanarBuffer src(2, 256);
+        at::AlignedPlanarBuffer dst(2, 256);
         for (uint32_t f = 0; f < 256; ++f) {
-            in_buf.channel(0)[f] = 1.0f; // +6dB pre-gain will boost to 2.0
-            in_buf.channel(1)[f] = 1.0f;
+            src.channel(0)[f] = 1.0f;
+            src.channel(1)[f] = 1.0f;
         }
 
-        AT_AudioBusView in_view{ 999, "TestSrc", 2, 256, in_buf.channel_ptrs() };
-        AT_AudioProcessContext ctx{};
-        ctx.sample_rate = 48000;
-        ctx.num_frames = 256;
-        ctx.input_bus_count = 1;
-        ctx.input_buses = &in_view;
-        ctx.output_bus = { lim_id, "Test Limiter", 2, 256, out_buf.channel_ptrs() };
-
-        lim_node->bundle->vtable->process_audio(lim_node->handle, &ctx);
+        eng.device_manager().inject_virtual_input_frames("virtual://test_lim_in", src.channel_ptrs(), 2, 256);
+        eng.process_single_tick();
+        eng.device_manager().extract_virtual_output_frames("virtual://test_lim_out", dst.channel_ptrs(), 2, 256);
 
         float max_out = 0.0f;
         for (uint32_t f = 0; f < 256; ++f) {
-            max_out = std::max(max_out, std::abs(out_buf.channel(0)[f]));
+            max_out = std::max(max_out, std::abs(dst.channel(0)[f]));
         }
         // Ceiling is -6.0 dB = 0.501187. Must never exceed ceiling!
         TEST_ASSERT(max_out <= 0.505f, "Limiter failed to clamp audio to ceiling: max_out=" + std::to_string(max_out));
     }
 
-    // 3. Test Equalizer Band Controls
+    // 3. Test Equalizer 16 Band Controls
     {
         uint32_t eq_id = engine.spawn_node("at.builtin.audio.equalizer", "Test EQ", &err);
         TEST_ASSERT(eq_id != 0, "Failed to spawn EqualizerNode");
 
-        const auto* eq_node = engine.active_profile().find_node(eq_id);
-        TEST_ASSERT(eq_node != nullptr, "EQ node missing in profile");
-
-        // Verify 16 bands can be read and set
         for (int i = 0; i < 16; ++i) {
             std::string ident = "band_" + std::to_string(i);
             AT_ControlValue g_val{ AT_VAL_FLOAT, { .float_val = 6.0 } };
@@ -629,110 +628,112 @@ bool test_10_additional_audio_processing_nodes() {
         }
     }
 
-    // 4. Test Filter Lowpass Attenuation
+    // 4. Test Filter Lowpass Attenuation via Virtual Audio Loop
     {
-        uint32_t flt_id = engine.spawn_node("at.builtin.audio.filter", "Test LP Filter", &err);
-        TEST_ASSERT(flt_id != 0, "Failed to spawn FilterNode");
+        at::AudioGraphEngine eng;
+        TEST_ASSERT(eng.initialize(cfg, &err), "Engine init failed");
 
-        // Cutoff at 200 Hz
+        uint32_t in_n  = eng.spawn_node("at.builtin.audio.virtual_input", "In", &err);
+        uint32_t flt_n = eng.spawn_node("at.builtin.audio.filter", "Flt", &err);
+        uint32_t out_n = eng.spawn_node("at.builtin.audio.output", "Out", &err);
+
+        AT_ControlValue in_dev{ AT_VAL_STRING, { .string_val = "virtual://test_flt_in" } };
+        AT_ControlValue out_dev{ AT_VAL_STRING, { .string_val = "virtual://test_flt_out" } };
+        eng.set_node_control_by_identifier(in_n, "device_id", in_dev);
+        eng.set_node_control_by_identifier(out_n, "device_id", out_dev);
+
         AT_ControlValue fc_val{ AT_VAL_FLOAT, { .float_val = 200.0 } };
-        TEST_ASSERT(engine.set_node_control_by_identifier(flt_id, "cutoff_hz", fc_val) == AT_OK, "Failed to set cutoff");
+        eng.set_node_control_by_identifier(flt_n, "cutoff_hz", fc_val);
 
-        const auto* flt_node = engine.active_profile().find_node(flt_id);
-        TEST_ASSERT(flt_node != nullptr, "Filter node missing");
+        eng.connect_audio(in_n, flt_n);
+        eng.connect_audio(flt_n, out_n);
 
-        // Input: High frequency 10 kHz sine wave (amp 1.0)
-        at::AlignedPlanarBuffer in_buf(2, 256);
-        at::AlignedPlanarBuffer out_buf(2, 256);
+        at::AlignedPlanarBuffer src(2, 256);
+        at::AlignedPlanarBuffer dst(2, 256);
         for (uint32_t f = 0; f < 256; ++f) {
             float s = std::sin(2.0f * static_cast<float>(kPi) * 10000.0f * (f / 48000.0f));
-            in_buf.channel(0)[f] = s;
-            in_buf.channel(1)[f] = s;
+            src.channel(0)[f] = s;
+            src.channel(1)[f] = s;
         }
 
-        AT_AudioBusView in_view{ 998, "TestSrc", 2, 256, in_buf.channel_ptrs() };
-        AT_AudioProcessContext ctx{};
-        ctx.sample_rate = 48000;
-        ctx.num_frames = 256;
-        ctx.input_bus_count = 1;
-        ctx.input_buses = &in_view;
-        ctx.output_bus = { flt_id, "Test Filter", 2, 256, out_buf.channel_ptrs() };
-
-        flt_node->bundle->vtable->process_audio(flt_node->handle, &ctx);
+        eng.device_manager().inject_virtual_input_frames("virtual://test_flt_in", src.channel_ptrs(), 2, 256);
+        eng.process_single_tick();
+        eng.device_manager().extract_virtual_output_frames("virtual://test_flt_out", dst.channel_ptrs(), 2, 256);
 
         float max_out = 0.0f;
-        for (uint32_t f = 128; f < 256; ++f) { // check after settle
-            max_out = std::max(max_out, std::abs(out_buf.channel(0)[f]));
+        for (uint32_t f = 128; f < 256; ++f) {
+            max_out = std::max(max_out, std::abs(dst.channel(0)[f]));
         }
-        // 10 kHz is ~5.6 octaves above 200 Hz, with 12 dB/oct attenuation should be < 0.1
         TEST_ASSERT(max_out < 0.1f, "Filter failed to attenuate high frequencies: max_out=" + std::to_string(max_out));
     }
 
-    // 5. Test Noise Gate Silence Clamping
+    // 5. Test Noise Gate Silence Clamping via Virtual Audio Loop
     {
-        uint32_t ng_id = engine.spawn_node("at.builtin.audio.noise_gate", "Test Gate", &err);
-        TEST_ASSERT(ng_id != 0, "Failed to spawn NoiseGateNode");
+        at::AudioGraphEngine eng;
+        TEST_ASSERT(eng.initialize(cfg, &err), "Engine init failed");
 
-        const auto* ng_node = engine.active_profile().find_node(ng_id);
-        TEST_ASSERT(ng_node != nullptr, "Noise gate node missing");
+        uint32_t in_n = eng.spawn_node("at.builtin.audio.virtual_input", "In", &err);
+        uint32_t ng_n = eng.spawn_node("at.builtin.audio.noise_gate", "Gate", &err);
+        uint32_t out_n = eng.spawn_node("at.builtin.audio.output", "Out", &err);
 
-        // Quiet signal (-60 dB = 0.001 amplitude, below -45 dB threshold)
-        at::AlignedPlanarBuffer in_buf(2, 256);
-        at::AlignedPlanarBuffer out_buf(2, 256);
+        AT_ControlValue in_dev{ AT_VAL_STRING, { .string_val = "virtual://test_ng_in" } };
+        AT_ControlValue out_dev{ AT_VAL_STRING, { .string_val = "virtual://test_ng_out" } };
+        eng.set_node_control_by_identifier(in_n, "device_id", in_dev);
+        eng.set_node_control_by_identifier(out_n, "device_id", out_dev);
+
+        eng.connect_audio(in_n, ng_n);
+        eng.connect_audio(ng_n, out_n);
+
+        at::AlignedPlanarBuffer src(2, 256);
+        at::AlignedPlanarBuffer dst(2, 256);
         for (uint32_t f = 0; f < 256; ++f) {
-            in_buf.channel(0)[f] = 0.001f;
-            in_buf.channel(1)[f] = 0.001f;
+            src.channel(0)[f] = 0.001f; // -60 dB, below -45 dB threshold
+            src.channel(1)[f] = 0.001f;
         }
 
-        AT_AudioBusView in_view{ 997, "TestSrc", 2, 256, in_buf.channel_ptrs() };
-        AT_AudioProcessContext ctx{};
-        ctx.sample_rate = 48000;
-        ctx.num_frames = 256;
-        ctx.input_bus_count = 1;
-        ctx.input_buses = &in_view;
-        ctx.output_bus = { ng_id, "Test Gate", 2, 256, out_buf.channel_ptrs() };
-
-        ng_node->bundle->vtable->process_audio(ng_node->handle, &ctx);
+        eng.device_manager().inject_virtual_input_frames("virtual://test_ng_in", src.channel_ptrs(), 2, 256);
+        eng.process_single_tick();
+        eng.device_manager().extract_virtual_output_frames("virtual://test_ng_out", dst.channel_ptrs(), 2, 256);
 
         float max_out = 0.0f;
         for (uint32_t f = 0; f < 256; ++f) {
-            max_out = std::max(max_out, std::abs(out_buf.channel(0)[f]));
+            max_out = std::max(max_out, std::abs(dst.channel(0)[f]));
         }
-        // Sub-threshold quiet signal should be attenuated below 0.0001
         TEST_ASSERT(max_out <= 0.0005f, "Noise gate failed to mute sub-threshold audio: max_out=" + std::to_string(max_out));
     }
 
-    // 6. Test Bitcrusher Quantization
+    // 6. Test Bitcrusher Quantization via Virtual Audio Loop
     {
-        uint32_t bit_id = engine.spawn_node("at.builtin.audio.bitcrusher", "Test Bitcrusher", &err);
-        TEST_ASSERT(bit_id != 0, "Failed to spawn BitcrusherNode");
+        at::AudioGraphEngine eng;
+        TEST_ASSERT(eng.initialize(cfg, &err), "Engine init failed");
 
-        // Set to 2-bit quantization (steps = 2^(2-1) = 2, values in {-1, -0.5, 0, 0.5, 1})
+        uint32_t in_n  = eng.spawn_node("at.builtin.audio.virtual_input", "In", &err);
+        uint32_t bit_n = eng.spawn_node("at.builtin.audio.bitcrusher", "Bit", &err);
+        uint32_t out_n = eng.spawn_node("at.builtin.audio.output", "Out", &err);
+
+        AT_ControlValue in_dev{ AT_VAL_STRING, { .string_val = "virtual://test_bit_in" } };
+        AT_ControlValue out_dev{ AT_VAL_STRING, { .string_val = "virtual://test_bit_out" } };
+        eng.set_node_control_by_identifier(in_n, "device_id", in_dev);
+        eng.set_node_control_by_identifier(out_n, "device_id", out_dev);
+
         AT_ControlValue bits_val{ AT_VAL_FLOAT, { .float_val = 2.0 } };
-        TEST_ASSERT(engine.set_node_control_by_identifier(bit_id, "bit_depth", bits_val) == AT_OK, "Failed to set bit depth");
+        eng.set_node_control_by_identifier(bit_n, "bit_depth", bits_val);
 
-        const auto* bit_node = engine.active_profile().find_node(bit_id);
-        TEST_ASSERT(bit_node != nullptr, "Bitcrusher node missing");
+        eng.connect_audio(in_n, bit_n);
+        eng.connect_audio(bit_n, out_n);
 
-        at::AlignedPlanarBuffer in_buf(2, 256);
-        at::AlignedPlanarBuffer out_buf(2, 256);
+        at::AlignedPlanarBuffer src(2, 256);
+        at::AlignedPlanarBuffer dst(2, 256);
         for (uint32_t f = 0; f < 256; ++f) {
-            in_buf.channel(0)[f] = 0.234567f;
-            in_buf.channel(1)[f] = 0.234567f;
+            src.channel(0)[f] = 0.234567f;
+            src.channel(1)[f] = 0.234567f;
         }
 
-        AT_AudioBusView in_view{ 996, "TestSrc", 2, 256, in_buf.channel_ptrs() };
-        AT_AudioProcessContext ctx{};
-        ctx.sample_rate = 48000;
-        ctx.num_frames = 256;
-        ctx.input_bus_count = 1;
-        ctx.input_buses = &in_view;
-        ctx.output_bus = { bit_id, "Test Bitcrusher", 2, 256, out_buf.channel_ptrs() };
+        eng.device_manager().inject_virtual_input_frames("virtual://test_bit_in", src.channel_ptrs(), 2, 256);
+        eng.process_single_tick();
+        eng.device_manager().extract_virtual_output_frames("virtual://test_bit_out", dst.channel_ptrs(), 2, 256);
 
-        bit_node->bundle->vtable->process_audio(bit_node->handle, &ctx);
-
-        // 0.234567 rounded to step size 0.5 is 0.0 or 0.5
-        float out_val = out_buf.channel(0)[10];
+        float out_val = dst.channel(0)[10];
         TEST_ASSERT(std::abs(out_val - 0.0f) < 1e-4f || std::abs(out_val - 0.5f) < 1e-4f,
                     "Bitcrusher quantization failure: got " + std::to_string(out_val));
     }
