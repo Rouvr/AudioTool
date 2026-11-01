@@ -54,8 +54,14 @@ function Write-VersionHeader([string]$GitSha) {
     Set-Content -Path $HeaderPath -Value $HeaderContent -Encoding UTF8
 }
 
-# 3. Write initial version header and commit changes to Git
-Write-VersionHeader -GitSha "PENDING"
+# 3. Write version header and commit changes to Git
+$ParentSha = (git rev-parse --short HEAD 2>$null)
+if ([string]::IsNullOrWhiteSpace($ParentSha)) {
+    $ParentSha = "ROOT"
+} else {
+    $ParentSha = $ParentSha.Trim()
+}
+Write-VersionHeader -GitSha $ParentSha
 
 if (-not $SkipCommit) {
     git add -A
@@ -67,19 +73,6 @@ if (-not $SkipCommit) {
         Write-Host "[Git] Committing workspace changes: $CommitMessage" -ForegroundColor Yellow
         git commit -m "$CommitMessage" | Out-Host
     }
-}
-
-$CurrentSha = (git rev-parse --short HEAD 2>$null)
-if ([string]::IsNullOrWhiteSpace($CurrentSha)) {
-    $CurrentSha = "UNCOMMITTED"
-}
-Write-VersionHeader -GitSha $CurrentSha.Trim()
-
-if (-not $SkipCommit) {
-    git add "include/at_version.h"
-    git commit --amend --no-edit | Out-Null
-    $CurrentSha = (git rev-parse --short HEAD 2>$null).Trim()
-    Write-VersionHeader -GitSha $CurrentSha
 }
 
 # 4. Locate Visual Studio 2022 CMake, Ninja, and vcvars64.bat
