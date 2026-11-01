@@ -64,10 +64,12 @@ bool test_2_plugin_discovery_and_shadow_copy() {
     TEST_ASSERT(engine.initialize({}, &err), "Engine initialize failed: " + err);
 
     const auto* vi_plugin  = engine.plugin_manager().find_plugin("at.builtin.audio.virtual_input");
+    const auto* vol_plugin = engine.plugin_manager().find_plugin("at.builtin.audio.volume");
     const auto* out_plugin = engine.plugin_manager().find_plugin("at.builtin.audio.output");
     const auto* tmr_plugin = engine.plugin_manager().find_plugin("at.builtin.control.timer");
 
     TEST_ASSERT(vi_plugin != nullptr, "VirtualInputNode.dll was not discovered in %LOCALAPPDATA%\\Rouvr\\AudioTool\\plugins");
+    TEST_ASSERT(vol_plugin != nullptr, "VolumeNode.dll was not discovered in %LOCALAPPDATA%\\Rouvr\\AudioTool\\plugins");
     TEST_ASSERT(out_plugin != nullptr, "OutputNode.dll was not discovered in %LOCALAPPDATA%\\Rouvr\\AudioTool\\plugins");
     TEST_ASSERT(tmr_plugin != nullptr, "TimerNode.dll was not discovered in %LOCALAPPDATA%\\Rouvr\\AudioTool\\plugins");
 
@@ -75,7 +77,7 @@ bool test_2_plugin_discovery_and_shadow_copy() {
     TEST_ASSERT(std::filesystem::exists(vi_plugin->shadow_dll_path), "Shadow DLL file must exist while loaded");
     TEST_ASSERT(std::string(vi_plugin->bundle->descriptor->build_id_str) == AT_BUILD_ID, "Plugin Build ID must match Engine Build ID");
 
-    std::cout << "  -> Passed! Loaded 3 DLL plugins via shadow copy.\n";
+    std::cout << "  -> Passed! Loaded 4 DLL plugins via shadow copy.\n";
     return true;
 }
 
@@ -320,7 +322,7 @@ int main() {
     if (!test_6_volume_node_mixing_and_normalization()) return 1;
 
     std::cout << "====================================================================\n";
-    std::cout << " ALL 5 AUTOMATED PROOF-OF-CONCEPT TESTS PASSED SUCCESSFULLY!\n";
+    std::cout << " ALL 6 AUTOMATED PROOF-OF-CONCEPT TESTS PASSED SUCCESSFULLY!\n";
     std::cout << "====================================================================\n";
     return 0;
 }
