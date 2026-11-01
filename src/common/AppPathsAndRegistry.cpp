@@ -97,6 +97,18 @@ std::filesystem::path AppPathsAndRegistry::get_config_file_path() {
     return get_local_data_root() / L"config.json";
 }
 
+std::filesystem::path AppPathsAndRegistry::get_routing_presets_dir() {
+    return get_local_data_root() / L"routing_presets";
+}
+
+std::filesystem::path AppPathsAndRegistry::get_routing_original_file_path() {
+    return get_local_data_root() / L"app_routing_original.json";
+}
+
+std::filesystem::path AppPathsAndRegistry::get_routing_config_file_path() {
+    return get_local_data_root() / L"app_routing_config.json";
+}
+
 std::filesystem::path AppPathsAndRegistry::get_executable_install_dir() {
     wchar_t module_path[MAX_PATH * 4] = {};
     DWORD len = GetModuleFileNameW(nullptr, module_path, static_cast<DWORD>(std::size(module_path)));
@@ -112,9 +124,11 @@ bool AppPathsAndRegistry::ensure_directories_exist(std::string* out_error) {
         const auto profiles = get_profiles_dir();
         const auto plugins = get_plugins_dir();
         const auto cache = get_plugin_shadow_cache_dir();
+        const auto routing_presets = get_routing_presets_dir();
 
         std::filesystem::create_directories(root);
         std::filesystem::create_directories(profiles);
+        std::filesystem::create_directories(routing_presets);
         std::filesystem::create_directories(plugins / L"Audio" / L"Sources");
         std::filesystem::create_directories(plugins / L"Audio" / L"Processing");
         std::filesystem::create_directories(plugins / L"Audio" / L"Outputs");

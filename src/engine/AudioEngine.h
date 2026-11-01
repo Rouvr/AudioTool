@@ -10,6 +10,7 @@
 #include "engine/DeviceManager.h"
 #include "engine/EngineTypes.h"
 #include "engine/PluginManager.h"
+#include "engine/AppAudioRouter.h"
 #include "engine/ProfileGraph.h"
 
 #include <atomic>
@@ -45,6 +46,7 @@ public:
 
     DeviceManager& device_manager() noexcept { return device_manager_; }
     PluginManager& plugin_manager() noexcept { return plugin_manager_; }
+    AppAudioRouter& audio_router() noexcept { return audio_router_; }
 
     // Re-scans %LOCALAPPDATA%\Rouvr\AudioTool\plugins (new DLLs; replaces DLLs without live instances)
     size_t                  rescan_plugins(std::vector<std::string>* out_errors = nullptr);
@@ -80,6 +82,7 @@ private:
     EngineConfig                                      config_;
     DeviceManager                                     device_manager_;
     PluginManager                                     plugin_manager_;
+    AppAudioRouter                                    audio_router_;
     std::map<uint32_t, std::unique_ptr<ProfileGraph>> profiles_;
     uint32_t                                          next_profile_id_ = 1;
 

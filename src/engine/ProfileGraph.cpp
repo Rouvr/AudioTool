@@ -590,7 +590,32 @@ ProfileSnapshot ProfileGraph::snapshot() const {
         }
         s.control_edges.push_back(std::move(ce));
     }
+    s.app_routing = app_routing_;
     return s;
+}
+
+std::map<std::string, std::string> ProfileGraph::app_routing() const {
+    Lock lock(engine_.mutex());
+    return app_routing_;
+}
+
+void ProfileGraph::set_app_routing(const std::map<std::string, std::string>& routing) {
+    Lock lock(engine_.mutex());
+    app_routing_ = routing;
+}
+
+void ProfileGraph::set_app_routing_entry(const std::string& process_name, const std::string& endpoint_id) {
+    Lock lock(engine_.mutex());
+    if (endpoint_id.empty() || endpoint_id == "(default)" || endpoint_id == "default") {
+        app_routing_.erase(process_name);
+    } else {
+        app_routing_[process_name] = endpoint_id;
+    }
+}
+
+void ProfileGraph::clear_app_routing_entry(const std::string& process_name) {
+    Lock lock(engine_.mutex());
+    app_routing_.erase(process_name);
 }
 
 // ---------------------------------------------------------------------------

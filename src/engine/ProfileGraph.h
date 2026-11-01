@@ -100,6 +100,12 @@ public:
     ProfileSnapshot snapshot() const;
     bool            node_snapshot(uint32_t node_id, NodeSnapshot& out) const;
 
+    // --- Application Audio Routing ---
+    std::map<std::string, std::string> app_routing() const;
+    void set_app_routing(const std::map<std::string, std::string>& routing);
+    void set_app_routing_entry(const std::string& process_name, const std::string& endpoint_id);
+    void clear_app_routing_entry(const std::string& process_name);
+
     // --- Engine internals (called with engine mutex held) ---
     void process_tick(uint32_t frames, uint64_t sample_ts, uint64_t time_ns);
     void prepare_all_nodes();
@@ -122,6 +128,7 @@ private:
     std::unordered_map<uint32_t, std::unique_ptr<GraphNodeInstance>> nodes_;
     std::vector<AudioEdge>                                           audio_edges_;
     std::vector<ControlEdge>                                         control_edges_;
+    std::map<std::string, std::string>                               app_routing_;
     std::vector<GraphNodeInstance*>                                  sorted_audio_nodes_;
     std::vector<GraphNodeInstance*>                                  control_nodes_;
     std::vector<AT_AudioBusView>                                     scratch_input_views_;

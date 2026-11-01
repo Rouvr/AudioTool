@@ -54,6 +54,7 @@ add_library(at_engine STATIC
     src/engine/ProfileGraph.cpp
     src/engine/AudioEngine.cpp
     src/engine/AudioGraphEngine.cpp
+    src/engine/AppAudioRouter.cpp
 )
 
 target_link_libraries(at_engine PUBLIC

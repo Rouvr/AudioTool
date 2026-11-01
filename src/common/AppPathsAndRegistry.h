@@ -31,6 +31,9 @@ public:
     static std::filesystem::path get_plugins_dir();
     static std::filesystem::path get_plugin_shadow_cache_dir();
     static std::filesystem::path get_config_file_path();
+    static std::filesystem::path get_routing_presets_dir();
+    static std::filesystem::path get_routing_original_file_path();
+    static std::filesystem::path get_routing_config_file_path();
 
     // Resolves the directory containing the currently running executable
     static std::filesystem::path get_executable_install_dir();

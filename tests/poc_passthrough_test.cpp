@@ -388,6 +388,82 @@ bool test_7_gui_canvas_controls_and_row_alignment() {
     return true;
 }
 
+bool test_8_app_audio_router_and_profile_persistence() {
+    std::cout << "[TEST 8] Verifying AppAudioRouter, session enumeration, presets, and profile routing persistence...\n";
+
+    at::AudioEngine engine;
+    std::string err;
+    TEST_ASSERT(engine.initialize({}, &err), "Engine initialization failed: " + err);
+
+    auto render_devices = engine.device_manager().enumerate_devices();
+    std::vector<at::AudioDeviceInfo> out_devs;
+    for (const auto& d : render_devices) {
+        if (d.is_output_render) out_devs.push_back(d);
+    }
+
+    // 1. Enumerate active audio applications
+    auto apps = engine.audio_router().enumerate_apps(render_devices);
+    std::cout << "  -> Enumerated " << apps.size() << " active audio applications.\n";
+    for (const auto& a : apps) {
+        std::cout << "     App: " << a.process_name << " (PID " << a.pid << ") Current Device: " << a.current_device_name << "\n";
+    }
+
+    // 2. Test Standalone Routing Presets Save/Load/Delete
+    std::map<std::string, std::string> sample_mapping = {
+        { "firefox.exe", "{0.0.0.00000000}.{dummy-vb-cable-guid}" },
+        { "spotify.exe", "{0.0.0.00000000}.{dummy-speakers-guid}" }
+    };
+    std::string preset_err;
+    TEST_ASSERT(engine.audio_router().save_preset("TestStreamingPreset", sample_mapping, &preset_err), "save_preset failed: " + preset_err);
+
+    auto presets = engine.audio_router().list_presets();
+    bool found_preset = false;
+    for (const auto& p : presets) {
+        if (p == "TestStreamingPreset") found_preset = true;
+    }
+    TEST_ASSERT(found_preset, "TestStreamingPreset was not found in list_presets()");
+
+    std::map<std::string, std::string> loaded_mapping;
+    TEST_ASSERT(engine.audio_router().load_preset("TestStreamingPreset", &loaded_mapping, &preset_err), "load_preset failed: " + preset_err);
+    TEST_ASSERT(loaded_mapping.size() == 2, "Loaded mapping count mismatch");
+    TEST_ASSERT(loaded_mapping["firefox.exe"] == "{0.0.0.00000000}.{dummy-vb-cable-guid}", "Mapping value mismatch for firefox.exe");
+
+    TEST_ASSERT(engine.audio_router().delete_preset("TestStreamingPreset", &preset_err), "delete_preset failed: " + preset_err);
+
+    // 3. Test Profile Routing Serialization & Loading
+    auto* prof = engine.create_profile("RoutingProfile");
+    TEST_ASSERT(prof != nullptr, "Failed to create profile");
+    prof->set_app_routing_entry("firefox.exe", "{0.0.0.00000000}.{dummy-vb-cable-guid}");
+    prof->set_app_routing_entry("game.exe", "{0.0.0.00000000}.{dummy-headphones-guid}");
+
+    auto routing_map = prof->app_routing();
+    TEST_ASSERT(routing_map.size() == 2, "Profile routing map must have 2 entries");
+    TEST_ASSERT(routing_map["firefox.exe"] == "{0.0.0.00000000}.{dummy-vb-cable-guid}", "Profile routing value mismatch");
+
+    std::filesystem::path prof_file = at::AppPathsAndRegistry::get_profiles_dir() / "test_app_routing.atprof";
+    std::string save_err;
+    TEST_ASSERT(engine.save_profile(prof->id(), prof_file, &save_err), "Failed to save profile: " + save_err);
+
+    std::string load_err;
+    auto* loaded_prof = engine.load_profile(prof_file, &load_err);
+    TEST_ASSERT(loaded_prof != nullptr, "Failed to load saved profile: " + load_err);
+    auto loaded_routing = loaded_prof->app_routing();
+    TEST_ASSERT(loaded_routing.size() == 2, "Loaded profile app_routing size mismatch");
+    TEST_ASSERT(loaded_routing["firefox.exe"] == "{0.0.0.00000000}.{dummy-vb-cable-guid}", "Loaded profile app_routing for firefox.exe mismatch");
+    TEST_ASSERT(loaded_routing["game.exe"] == "{0.0.0.00000000}.{dummy-headphones-guid}", "Loaded profile app_routing for game.exe mismatch");
+
+    std::filesystem::remove(prof_file);
+
+    // 4. Test Revert on Exit Configuration
+    engine.audio_router().set_revert_on_exit(true);
+    TEST_ASSERT(engine.audio_router().get_revert_on_exit() == true, "revert_on_exit must be true");
+    engine.audio_router().revert_all_to_original();
+
+    engine.shutdown();
+    std::cout << "  -> Passed! AppAudioRouter enumeration, presets, and profile routing persistence verified successfully.\n";
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -405,9 +481,10 @@ int main() {
     if (!test_5_runtime_reload_and_wasapi_enumeration()) return 1;
     if (!test_6_volume_node_mixing_and_normalization()) return 1;
     if (!test_7_gui_canvas_controls_and_row_alignment()) return 1;
+    if (!test_8_app_audio_router_and_profile_persistence()) return 1;
 
     std::cout << "====================================================================\n";
-    std::cout << " ALL 7 AUTOMATED PROOF-OF-CONCEPT TESTS PASSED SUCCESSFULLY!\n";
+    std::cout << " ALL 8 AUTOMATED PROOF-OF-CONCEPT TESTS PASSED SUCCESSFULLY!\n";
     std::cout << "====================================================================\n";
     return 0;
 }

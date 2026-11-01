@@ -9,6 +9,7 @@
 #include "at_sdk/at_abi.h"
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -149,6 +150,7 @@ struct ProfileSnapshot {
     std::vector<NodeSnapshot>        nodes;
     std::vector<AudioEdgeSnapshot>   audio_edges;
     std::vector<ControlEdgeSnapshot> control_edges;
+    std::map<std::string, std::string> app_routing; // process_name -> endpoint_id
 };
 
 struct PluginInfo {

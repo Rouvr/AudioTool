@@ -136,6 +136,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     uint32_t active_profile_id = cur_profile ? cur_profile->id() : 1;
     uint32_t pending_select_profile_id = active_profile_id;
     bool show_settings_modal = false;
+    bool show_app_router_window = false;
+    std::vector<at::AudioAppSession> cached_audio_apps;
+    double last_apps_refresh_time = -10.0;
+    std::string router_status_msg = "Ready";
+    char app_filter_buf[128] = {};
+    char new_preset_name_buf[128] = {};
+    int selected_preset_idx = 0;
 
     // 4. Main Event Loop
     bool done = false;
@@ -194,6 +201,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
                         }
                     }
                 }
+            }
+            if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_R, false)) {
+                show_app_router_window = !show_app_router_window;
             }
             if (!io.KeyCtrl && !io.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_Tab, false)) {
                 if (auto* p = engine.find_profile(active_profile_id)) {
@@ -287,6 +297,22 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
                     MessageBoxA(hwnd, rescan_msg.c_str(), "Plugin Scan", MB_ICONINFORMATION);
                 }
                 ImGui::EndMenu();
+            }
+
+            if (ImGui::BeginMenu("Audio Router")) {
+                if (ImGui::MenuItem("App Audio Output Editor...", "Ctrl+R")) {
+                    show_app_router_window = true;
+                }
+                if (ImGui::MenuItem("Revert All to Original Routing")) {
+                    engine.audio_router().revert_all_to_original();
+                    router_status_msg = "Reverted all applications to original system output.";
+                }
+                ImGui::EndMenu();
+            }
+
+            ImGui::SameLine(0.0f, 16.0f);
+            if (ImGui::SmallButton(" App Audio Router ")) {
+                show_app_router_window = true;
             }
 
             // Right-aligned view switcher: [ Audio Stream View | Control / Data View ]
@@ -457,6 +483,282 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
             ImGui::EndPopup();
         }
 
+        // Application Audio Output Router Popup Window
+        if (show_app_router_window) {
+            ImGui::SetNextWindowSize(ImVec2(860, 560), ImGuiCond_FirstUseEver);
+            if (ImGui::Begin("Application Audio Output Router", &show_app_router_window)) {
+                double cur_time = ImGui::GetTime();
+                auto all_devs = engine.device_manager().enumerate_devices();
+                std::vector<at::AudioDeviceInfo> out_render_devices;
+                for (const auto& d : all_devs) {
+                    if (d.is_output_render) out_render_devices.push_back(d);
+                }
+
+                if (cached_audio_apps.empty() || (cur_time - last_apps_refresh_time > 2.5)) {
+                    cached_audio_apps = engine.audio_router().enumerate_apps(all_devs);
+                    last_apps_refresh_time = cur_time;
+                }
+
+                auto* active_profile_ptr = engine.find_profile(active_profile_id);
+
+                // Top action toolbar
+                if (ImGui::Button("Refresh Apps")) {
+                    cached_audio_apps = engine.audio_router().enumerate_apps(all_devs);
+                    last_apps_refresh_time = cur_time;
+                    router_status_msg = "Application list refreshed.";
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Save to Profile")) {
+                    if (active_profile_ptr) {
+                        for (const auto& a : cached_audio_apps) {
+                            if (!a.current_device_id.empty()) {
+                                active_profile_ptr->set_app_routing_entry(a.process_name, a.current_device_id);
+                            }
+                        }
+                        std::string p_path = active_profile_ptr->metadata().file_path;
+                        if (!p_path.empty()) {
+                            std::string s_err;
+                            if (engine.save_profile(active_profile_id, p_path, &s_err)) {
+                                router_status_msg = "Routing saved to profile file: " + p_path;
+                            } else {
+                                router_status_msg = "Failed to save profile: " + s_err;
+                            }
+                        } else {
+                            router_status_msg = "Routing saved to active profile tab.";
+                        }
+                    }
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Apply Profile Routing")) {
+                    if (active_profile_ptr) {
+                        auto prof_routing = active_profile_ptr->app_routing();
+                        engine.audio_router().apply_routing_map(prof_routing);
+                        cached_audio_apps = engine.audio_router().enumerate_apps(all_devs);
+                        router_status_msg = "Applied " + std::to_string(prof_routing.size()) + " routing rules from profile.";
+                    }
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Reset All to Original")) {
+                    engine.audio_router().revert_all_to_original();
+                    cached_audio_apps = engine.audio_router().enumerate_apps(all_devs);
+                    router_status_msg = "Reverted all applications to original system output.";
+                }
+
+                ImGui::Separator();
+
+                // Standalone Routing Presets row
+                auto preset_names = engine.audio_router().list_presets();
+                ImGui::TextUnformatted("Preset:");
+                ImGui::SameLine();
+                std::string current_preset_label = (selected_preset_idx >= 0 && selected_preset_idx < static_cast<int>(preset_names.size()))
+                                                   ? preset_names[selected_preset_idx]
+                                                   : "<Select Preset...>";
+                ImGui::SetNextItemWidth(180.0f);
+                if (ImGui::BeginCombo("##PresetCombo", current_preset_label.c_str())) {
+                    for (int i = 0; i < static_cast<int>(preset_names.size()); ++i) {
+                        bool is_sel = (i == selected_preset_idx);
+                        if (ImGui::Selectable(preset_names[i].c_str(), is_sel)) {
+                            selected_preset_idx = i;
+                        }
+                        if (is_sel) ImGui::SetItemDefaultFocus();
+                    }
+                    ImGui::EndCombo();
+                }
+
+                ImGui::SameLine();
+                if (ImGui::Button("Apply Preset")) {
+                    if (selected_preset_idx >= 0 && selected_preset_idx < static_cast<int>(preset_names.size())) {
+                        std::map<std::string, std::string> mapping;
+                        std::string load_err;
+                        if (engine.audio_router().load_preset(preset_names[selected_preset_idx], &mapping, &load_err)) {
+                            engine.audio_router().apply_routing_map(mapping);
+                            if (active_profile_ptr) {
+                                active_profile_ptr->set_app_routing(mapping);
+                            }
+                            cached_audio_apps = engine.audio_router().enumerate_apps(all_devs);
+                            router_status_msg = "Applied preset '" + preset_names[selected_preset_idx] + "'.";
+                        } else {
+                            router_status_msg = "Failed to load preset: " + load_err;
+                        }
+                    }
+                }
+
+                ImGui::SameLine();
+                if (ImGui::Button("Save Preset As...")) {
+                    ImGui::OpenPopup("Save Preset Dialog");
+                    new_preset_name_buf[0] = '\0';
+                }
+
+                ImGui::SameLine();
+                if (ImGui::Button("Delete Preset")) {
+                    if (selected_preset_idx >= 0 && selected_preset_idx < static_cast<int>(preset_names.size())) {
+                        std::string del_err;
+                        if (engine.audio_router().delete_preset(preset_names[selected_preset_idx], &del_err)) {
+                            router_status_msg = "Deleted preset '" + preset_names[selected_preset_idx] + "'.";
+                            selected_preset_idx = 0;
+                        } else {
+                            router_status_msg = "Failed to delete preset: " + del_err;
+                        }
+                    }
+                }
+
+                // Modal for Save Preset As...
+                if (ImGui::BeginPopupModal("Save Preset Dialog", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+                    ImGui::Text("Enter a name for the routing preset:");
+                    ImGui::InputText("##PresetNameInput", new_preset_name_buf, sizeof(new_preset_name_buf));
+                    if (ImGui::Button("Save", ImVec2(100, 0))) {
+                        std::string p_name = new_preset_name_buf;
+                        if (!p_name.empty()) {
+                            std::map<std::string, std::string> current_mapping;
+                            for (const auto& a : cached_audio_apps) {
+                                if (!a.current_device_id.empty()) {
+                                    current_mapping[a.process_name] = a.current_device_id;
+                                }
+                            }
+                            std::string s_err;
+                            if (engine.audio_router().save_preset(p_name, current_mapping, &s_err)) {
+                                router_status_msg = "Saved preset '" + p_name + "'.";
+                                ImGui::CloseCurrentPopup();
+                            } else {
+                                router_status_msg = "Error saving preset: " + s_err;
+                            }
+                        }
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Cancel", ImVec2(100, 0))) {
+                        ImGui::CloseCurrentPopup();
+                    }
+                    ImGui::EndPopup();
+                }
+
+                ImGui::SameLine();
+                ImGui::TextUnformatted("| Filter:");
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(160.0f);
+                ImGui::InputTextWithHint("##FilterInput", "Search apps...", app_filter_buf, sizeof(app_filter_buf));
+
+                ImGui::Separator();
+
+                // Table of Audio Applications
+                float table_h = ImGui::GetContentRegionAvail().y - 42.0f;
+                if (ImGui::BeginTable("AppsRoutingTable", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY, ImVec2(0.0f, table_h))) {
+                    ImGui::TableSetupColumn("Application", ImGuiTableColumnFlags_WidthStretch, 0.35f);
+                    ImGui::TableSetupColumn("PID", ImGuiTableColumnFlags_WidthFixed, 65.0f);
+                    ImGui::TableSetupColumn("Audio Output Playback Device", ImGuiTableColumnFlags_WidthStretch, 0.45f);
+                    ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthFixed, 85.0f);
+                    ImGui::TableHeadersRow();
+
+                    std::string filter_str = app_filter_buf;
+                    std::transform(filter_str.begin(), filter_str.end(), filter_str.begin(), ::tolower);
+
+                    int row_idx = 0;
+                    for (auto& app : cached_audio_apps) {
+                        std::string proc_lower = app.process_name;
+                        std::string disp_lower = app.display_name;
+                        std::transform(proc_lower.begin(), proc_lower.end(), proc_lower.begin(), ::tolower);
+                        std::transform(disp_lower.begin(), disp_lower.end(), disp_lower.begin(), ::tolower);
+
+                        if (!filter_str.empty()) {
+                            if (proc_lower.find(filter_str) == std::string::npos &&
+                                disp_lower.find(filter_str) == std::string::npos) {
+                                continue;
+                            }
+                        }
+
+                        ImGui::TableNextRow();
+                        ImGui::PushID(row_idx++);
+
+                        // Col 0: App Name
+                        ImGui::TableSetColumnIndex(0);
+                        if (!app.display_name.empty() && app.display_name != app.process_name) {
+                            ImGui::Text("%s (%s)", app.display_name.c_str(), app.process_name.c_str());
+                        } else {
+                            ImGui::Text("%s", app.process_name.c_str());
+                        }
+
+                        // Col 1: PID
+                        ImGui::TableSetColumnIndex(1);
+                        if (app.pid != 0) {
+                            ImGui::Text("%u", app.pid);
+                        } else {
+                            ImGui::TextDisabled("-");
+                        }
+
+                        // Col 2: Output Device Dropdown
+                        ImGui::TableSetColumnIndex(2);
+                        std::string combo_preview = "Default (Windows System Output)";
+                        for (const auto& dev : out_render_devices) {
+                            if (dev.endpoint_id == app.current_device_id) {
+                                combo_preview = dev.friendly_name;
+                                break;
+                            }
+                        }
+
+                        ImGui::SetNextItemWidth(-FLT_MIN);
+                        if (ImGui::BeginCombo("##DevCombo", combo_preview.c_str())) {
+                            bool is_def_selected = app.current_device_id.empty() || app.current_device_id == "(default)";
+                            if (ImGui::Selectable("Default (Windows System Output)", is_def_selected)) {
+                                app.current_device_id = "";
+                                app.current_device_name = "Default";
+                                engine.audio_router().set_app_output_device(app.pid, app.process_name, "");
+                                if (active_profile_ptr) {
+                                    active_profile_ptr->set_app_routing_entry(app.process_name, "");
+                                }
+                                router_status_msg = "Set " + app.process_name + " -> Default Output";
+                            }
+                            if (is_def_selected) ImGui::SetItemDefaultFocus();
+
+                            for (const auto& dev : out_render_devices) {
+                                bool is_sel = (dev.endpoint_id == app.current_device_id);
+                                if (ImGui::Selectable(dev.friendly_name.c_str(), is_sel)) {
+                                    app.current_device_id = dev.endpoint_id;
+                                    app.current_device_name = dev.friendly_name;
+                                    engine.audio_router().set_app_output_device(app.pid, app.process_name, dev.endpoint_id);
+                                    if (active_profile_ptr) {
+                                        active_profile_ptr->set_app_routing_entry(app.process_name, dev.endpoint_id);
+                                    }
+                                    router_status_msg = "Routed " + app.process_name + " -> " + dev.friendly_name;
+                                }
+                                if (is_sel) ImGui::SetItemDefaultFocus();
+                            }
+                            ImGui::EndCombo();
+                        }
+
+                        // Col 3: Status
+                        ImGui::TableSetColumnIndex(3);
+                        if (app.current_device_id.empty() || app.current_device_id == "(default)") {
+                            ImGui::TextDisabled("Default");
+                        } else {
+                            ImGui::TextColored(ImVec4(0.3f, 0.9f, 0.4f, 1.0f), "Routed");
+                        }
+
+                        ImGui::PopID();
+                    }
+                    ImGui::EndTable();
+                }
+
+                ImGui::Separator();
+
+                // Bottom row: Revert checkbox & Status & Close
+                bool revert = engine.audio_router().get_revert_on_exit();
+                if (ImGui::Checkbox("Revert to original configuration upon exit", &revert)) {
+                    engine.audio_router().set_revert_on_exit(revert);
+                }
+
+                ImGui::SameLine(0.0f, 20.0f);
+                ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "| %s", router_status_msg.c_str());
+
+                float avail_w = ImGui::GetContentRegionAvail().x;
+                if (avail_w > 90.0f) {
+                    ImGui::SameLine(ImGui::GetWindowWidth() - 90.0f);
+                }
+                if (ImGui::Button("Close", ImVec2(75, 0))) {
+                    show_app_router_window = false;
+                }
+            }
+            ImGui::End();
+        }
+
         ImGui::End(); // End AudioToolMainHost
 
         // Rendering
@@ -469,6 +771,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     }
 
     // Cleanup
+    if (engine.audio_router().get_revert_on_exit()) {
+        engine.audio_router().revert_all_to_original();
+    }
     engine.stop_realtime_loop();
     engine.shutdown();
 

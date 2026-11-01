@@ -302,6 +302,17 @@ ProfileGraph* AudioEngine::load_profile(const std::filesystem::path& file, std::
             }
         }
 
+        // Application Audio Routing
+        if (j.contains("app_routing") && j["app_routing"].is_object()) {
+            std::map<std::string, std::string> routing;
+            for (auto& [proc, val] : j["app_routing"].items()) {
+                if (val.is_string()) {
+                    routing[proc] = val.get<std::string>();
+                }
+            }
+            prof->set_app_routing(routing);
+        }
+
         return prof;
     } catch (const std::exception& e) {
         if (out_error) *out_error = e.what();
@@ -387,6 +398,12 @@ bool AudioEngine::save_profile(uint32_t profile_id, const std::filesystem::path&
             ctrl_conns_j.push_back(cj);
         }
         j["control_connections"] = ctrl_conns_j;
+
+        json routing_j = json::object();
+        for (const auto& [proc, endp] : snap.app_routing) {
+            routing_j[proc] = endp;
+        }
+        j["app_routing"] = routing_j;
 
         std::filesystem::create_directories(file.parent_path());
         std::ofstream f(file);
