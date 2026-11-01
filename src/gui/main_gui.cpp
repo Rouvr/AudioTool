@@ -153,11 +153,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
 
-        // Top Fullscreen Docking Host Window
+        // Top Fullscreen Host Window
         ImGuiViewport* viewport = ImGui::GetMainViewport();
         ImGui::SetNextWindowPos(viewport->WorkPos);
         ImGui::SetNextWindowSize(viewport->WorkSize);
-        ImGui::SetNextWindowViewport(viewport->ID);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
@@ -222,8 +221,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
                 if (ImGui::MenuItem("Rescan Plugins Folder")) {
                     std::vector<std::string> errs;
                     size_t loaded = engine.rescan_plugins(&errs);
-                    std::string msg = "Plugins reloaded: " + std::to_string(loaded);
-                    MessageBoxA(hwnd, msg.c_str(), "Plugin Scan", MB_ICONINFORMATION);
+                    std::string rescan_msg = "Plugins reloaded: " + std::to_string(loaded);
+                    MessageBoxA(hwnd, rescan_msg.c_str(), "Plugin Scan", MB_ICONINFORMATION);
                 }
                 ImGui::EndMenu();
             }
@@ -232,7 +231,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
             float menu_w = ImGui::GetWindowWidth();
             auto* cur_prof = engine.find_profile(active_profile_id);
             if (cur_prof) {
-                ProfileMetadata m = cur_prof->metadata();
+                at::ProfileMetadata m = cur_prof->metadata();
                 bool is_audio = (m.active_plane_view == "AUDIO");
 
                 ImGui::SetCursorPosX(menu_w - 300.0f);
