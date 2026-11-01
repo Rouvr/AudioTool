@@ -768,15 +768,15 @@ bool CanvasRenderer::render_nodes(
                     }
                 } else if (ctrl.control_type == AT_CTRL_RANGE_TEXT_INPUT || ctrl.control_type == AT_CTRL_VALUE_TEXT_INPUT) {
                     ImGui::SetNextItemWidth(widget_w);
-                    if (ctrl.predefined_count > 0 && ctrl.predefined_values != nullptr) {
+                    if (!ctrl.predefined_values.empty()) {
                         int idx = (ctrl.value_type == AT_VAL_INT) ? static_cast<int>(ctrl.value.int_val) : 0;
-                        const char* preview = (idx >= 0 && idx < static_cast<int>(ctrl.predefined_count)) ? ctrl.predefined_values[idx] : "Select...";
+                        const char* preview = (idx >= 0 && idx < static_cast<int>(ctrl.predefined_values.size())) ? ctrl.predefined_values[idx].c_str() : "Select...";
                         if (ImGui::BeginCombo("##combomenu", preview)) {
-                            for (uint32_t i = 0; i < ctrl.predefined_count; ++i) {
+                            for (size_t i = 0; i < ctrl.predefined_values.size(); ++i) {
                                 bool is_sel = (idx == static_cast<int>(i));
-                                if (ImGui::Selectable(ctrl.predefined_values[i], is_sel)) {
+                                if (ImGui::Selectable(ctrl.predefined_values[i].c_str(), is_sel)) {
                                     if (ctrl.value_type == AT_VAL_INT) {
-                                        profile.set_control(node.node_id, ctrl.control_id, OwnedValue::make_int(i));
+                                        profile.set_control(node.node_id, ctrl.control_id, OwnedValue::make_int(static_cast<int64_t>(i)));
                                     }
                                 }
                                 if (is_sel) {
