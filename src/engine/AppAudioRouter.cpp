@@ -68,7 +68,7 @@ std::string extract_endpoint_id_from_full(const std::wstring& full_id) {
     } else {
         end += 1;
     }
-    return (end > start) ? std::string(full_id.begin() + start, full_id.begin() + end) : "";
+    return (end > start) ? utf8_encode(full_id.substr(start, end - start)) : "";
 }
 
 std::string utf8_encode(const std::wstring& wstr) {
