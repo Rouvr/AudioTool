@@ -156,27 +156,27 @@ Logger& Logger::instance() {
 }
 
 void Logger::set_min_level(LogLevel level) {
-    std::lock_guard<std::mutex> lock(impl_->mutex);
+    std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
     impl_->min_level = level;
 }
 
 LogLevel Logger::get_min_level() const {
-    std::lock_guard<std::mutex> lock(impl_->mutex);
+    std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
     return impl_->min_level;
 }
 
 std::string Logger::get_current_log_path() const {
-    std::lock_guard<std::mutex> lock(impl_->mutex);
+    std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
     return impl_->dated_path.string();
 }
 
 std::string Logger::get_latest_log_path() const {
-    std::lock_guard<std::mutex> lock(impl_->mutex);
+    std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
     return impl_->latest_path.string();
 }
 
 bool Logger::init(uint32_t max_retained_logs, LogLevel min_level) {
-    std::lock_guard<std::mutex> lock(impl_->mutex);
+    std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
     if (impl_->initialized) return true;
 
     impl_->min_level = min_level;
@@ -248,14 +248,14 @@ void Logger::install_crash_handler() {
 }
 
 void Logger::flush() {
-    std::lock_guard<std::mutex> lock(impl_->mutex);
+    std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
     if (impl_->dated_stream.is_open()) impl_->dated_stream.flush();
     if (impl_->latest_stream.is_open()) impl_->latest_stream.flush();
     std::cout.flush();
 }
 
 void Logger::shutdown() {
-    std::lock_guard<std::mutex> lock(impl_->mutex);
+    std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
     if (!impl_->initialized) return;
 
     if (impl_->dated_stream.is_open()) {
@@ -284,7 +284,7 @@ void Logger::log(LogLevel level, const char* subsystem, const char* file, int li
 
     std::string full_line = std::string(header_buf) + message + "\n";
 
-    std::lock_guard<std::mutex> lock(impl_->mutex);
+    std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
     if (impl_->dated_stream.is_open()) {
         impl_->dated_stream << full_line;
     }
