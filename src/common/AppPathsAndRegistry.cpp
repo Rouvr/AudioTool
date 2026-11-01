@@ -1,4 +1,5 @@
 #include "common/AppPathsAndRegistry.h"
+#include "common/Logger.h"
 #include "at_version.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -61,7 +62,11 @@ bool get_reg_sz(HKEY hKey, const wchar_t* value_name, std::wstring& out_val) {
 void AppPathsAndRegistry::harden_dll_search_order() {
     // Restrict implicit DLL loading to the application directory and System32 only.
     // Prevents CWD / untrusted PATH DLL hijacking.
-    SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_APPLICATION_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_APPLICATION_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32)) {
+        AT_LOG_DEBUG("SECURITY", "SetDefaultDllDirectories succeeded: restricted to APP_DIR and SYSTEM32");
+    } else {
+        AT_LOG_WARN("SECURITY", "SetDefaultDllDirectories failed: GLE=%lu", GetLastError());
+    }
 }
 
 std::filesystem::path AppPathsAndRegistry::get_local_data_root() {
@@ -97,6 +102,10 @@ std::filesystem::path AppPathsAndRegistry::get_config_file_path() {
     return get_local_data_root() / L"config.json";
 }
 
+std::filesystem::path AppPathsAndRegistry::get_logs_dir() {
+    return get_local_data_root() / L"logs";
+}
+
 std::filesystem::path AppPathsAndRegistry::get_routing_presets_dir() {
     return get_local_data_root() / L"routing_presets";
 }
@@ -125,10 +134,12 @@ bool AppPathsAndRegistry::ensure_directories_exist(std::string* out_error) {
         const auto plugins = get_plugins_dir();
         const auto cache = get_plugin_shadow_cache_dir();
         const auto routing_presets = get_routing_presets_dir();
+        const auto logs = get_logs_dir();
 
         std::filesystem::create_directories(root);
         std::filesystem::create_directories(profiles);
         std::filesystem::create_directories(routing_presets);
+        std::filesystem::create_directories(logs);
         std::filesystem::create_directories(plugins / L"Audio" / L"Sources");
         std::filesystem::create_directories(plugins / L"Audio" / L"Processing");
         std::filesystem::create_directories(plugins / L"Audio" / L"Outputs");
@@ -137,6 +148,7 @@ bool AppPathsAndRegistry::ensure_directories_exist(std::string* out_error) {
         return true;
     } catch (const std::exception& ex) {
         if (out_error) *out_error = ex.what();
+        AT_LOG_ERROR("FILESYSTEM", "Failed to create application directories: %s", ex.what());
         return false;
     }
 }
@@ -157,6 +169,7 @@ bool AppPathsAndRegistry::write_registry_metadata(std::string* out_error) {
 
     if (status != ERROR_SUCCESS || !hKey) {
         if (out_error) *out_error = "Failed to open/create HKCU\\Software\\Rouvr\\AudioTool registry key.";
+        AT_LOG_ERROR("WINAPI", "RegCreateKeyExW failed for HKCU\\%ls: status=%ld", kRegistrySubKey, status);
         return false;
     }
 
@@ -172,8 +185,11 @@ bool AppPathsAndRegistry::write_registry_metadata(std::string* out_error) {
     ok = set_reg_sz(hKey, L"BuildId", build_id_w) && ok;
 
     RegCloseKey(hKey);
-    if (!ok && out_error) {
-        *out_error = "Failed to write one or more values under HKCU\\Software\\Rouvr\\AudioTool.";
+    if (!ok) {
+        if (out_error) *out_error = "Failed to write one or more values under HKCU\\Software\\Rouvr\\AudioTool.";
+        AT_LOG_ERROR("WINAPI", "Failed to write metadata values under HKCU\\%ls", kRegistrySubKey);
+    } else {
+        AT_LOG_INFO("WINAPI", "Registry metadata written to HKCU\\%ls (BuildId: %s)", kRegistrySubKey, AT_BUILD_ID);
     }
     return ok;
 }

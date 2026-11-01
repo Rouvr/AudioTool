@@ -4,6 +4,7 @@
 
 #include "engine/AppAudioRouter.h"
 #include "common/AppPathsAndRegistry.h"
+#include "common/Logger.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -106,47 +107,61 @@ bool AppAudioRouter::init_com_factory() {
     if (factory_attempted_) return false;
 
     factory_attempted_ = true;
+    AT_LOG_DEBUG("COM/POLICY", "Attempting AudioPolicyConfig COM activation factory acquisition...");
 
     typedef HRESULT (WINAPI *pfnRoGetActivationFactory)(HSTRING, REFIID, void**);
     typedef HRESULT (WINAPI *pfnWindowsCreateString)(PCNZWCH, UINT32, HSTRING*);
     typedef HRESULT (WINAPI *pfnWindowsDeleteString)(HSTRING);
 
     HMODULE hComBase = LoadLibraryW(L"combase.dll");
-    if (!hComBase) return false;
+    if (!hComBase) {
+        AT_LOG_ERROR("WINAPI", "Failed to load combase.dll: GetLastError=%lu", GetLastError());
+        return false;
+    }
 
     auto pRoGetActivationFactory = (pfnRoGetActivationFactory)GetProcAddress(hComBase, "RoGetActivationFactory");
     auto pWindowsCreateString = (pfnWindowsCreateString)GetProcAddress(hComBase, "WindowsCreateString");
     auto pWindowsDeleteString = (pfnWindowsDeleteString)GetProcAddress(hComBase, "WindowsDeleteString");
 
     if (!pRoGetActivationFactory || !pWindowsCreateString || !pWindowsDeleteString) {
+        AT_LOG_ERROR("WINAPI", "Failed to resolve WinRT string/factory entry points in combase.dll");
         return false;
     }
 
     const wchar_t* className = L"Windows.Media.Internal.AudioPolicyConfig";
     HSTRING hsClass = nullptr;
     HRESULT hr = pWindowsCreateString(className, static_cast<UINT32>(wcslen(className)), &hsClass);
-    if (FAILED(hr) || !hsClass) return false;
+    if (FAILED(hr) || !hsClass) {
+        AT_LOG_ERROR("WINAPI", "WindowsCreateString failed for AudioPolicyConfig: hr=0x%08X", hr);
+        return false;
+    }
 
     void* factory = nullptr;
     // Try Windows 11 / 21390+ first
     hr = pRoGetActivationFactory(hsClass, IID_AudioPolicyConfig_Win11, &factory);
+    AT_LOG_DEBUG("COM/POLICY", "RoGetActivationFactory (Win11 IID): hr=0x%08X, factory=%p", hr, factory);
+
     if (FAILED(hr) || !factory) {
         // Fallback to downlevel Windows 10
         hr = pRoGetActivationFactory(hsClass, IID_AudioPolicyConfig_Win10, &factory);
+        AT_LOG_DEBUG("COM/POLICY", "RoGetActivationFactory fallback (Win10 downlevel IID): hr=0x%08X, factory=%p", hr, factory);
     }
 
     pWindowsDeleteString(hsClass);
 
     if (SUCCEEDED(hr) && factory) {
         audio_policy_factory_ = factory;
+        AT_LOG_INFO("COM/POLICY", "Successfully initialized Windows.Media.Internal.AudioPolicyConfig interface at %p", audio_policy_factory_);
         return true;
     }
 
+    AT_LOG_WARN("COM/POLICY", "Could not activate AudioPolicyConfig interface (unsupported Windows build or restricted security boundary)");
     return false;
 }
 
 void AppAudioRouter::release_com_factory() {
     if (audio_policy_factory_) {
+        AT_LOG_DEBUG("COM/POLICY", "Releasing AudioPolicyConfig interface (%p)", audio_policy_factory_);
         auto* obj = static_cast<IUnknown*>(audio_policy_factory_);
         obj->Release();
         audio_policy_factory_ = nullptr;
@@ -155,17 +170,34 @@ void AppAudioRouter::release_com_factory() {
 }
 
 bool AppAudioRouter::set_persisted_endpoint(uint32_t pid, const std::wstring& endpoint_id_w) {
-    if (!init_com_factory()) return false;
+    if (!init_com_factory()) {
+        AT_LOG_WARN("COM/POLICY", "Cannot set persisted endpoint: factory not initialized");
+        return false;
+    }
     auto* policy = static_cast<IAudioPolicyConfigFactory_Internal*>(audio_policy_factory_);
-    if (!policy) return false;
+    if (!policy) {
+        AT_LOG_ERROR("COM/POLICY", "audio_policy_factory_ is null during endpoint dispatch");
+        return false;
+    }
 
     LPCWSTR dev_ptr = endpoint_id_w.empty() ? nullptr : endpoint_id_w.c_str();
+
+    AT_LOG_DEBUG("COM/POLICY", "Calling SetPersistedDefaultAudioEndpoint(PID=%u, device='%s')",
+                 pid, dev_ptr ? utf8_encode(dev_ptr).c_str() : "[System Default]");
 
     // Route for both eConsole and eMultimedia roles so games, browsers, and media players are routed immediately
     HRESULT hr1 = policy->SetPersistedDefaultAudioEndpoint(pid, eRender, eConsole, dev_ptr);
     HRESULT hr2 = policy->SetPersistedDefaultAudioEndpoint(pid, eRender, eMultimedia, dev_ptr);
 
-    return SUCCEEDED(hr1) || SUCCEEDED(hr2);
+    if (FAILED(hr1) && FAILED(hr2)) {
+        AT_LOG_WARN("COM/POLICY", "SetPersistedDefaultAudioEndpoint failed for PID=%u (eConsole: 0x%08X, eMultimedia: 0x%08X)",
+                    pid, hr1, hr2);
+        return false;
+    }
+
+    AT_LOG_INFO("COM/POLICY", "Successfully set audio endpoint for PID %u (eConsole: 0x%08X, eMultimedia: 0x%08X)",
+                pid, hr1, hr2);
+    return true;
 }
 
 std::vector<AudioAppSession> AppAudioRouter::enumerate_apps(const std::vector<AudioDeviceInfo>& available_devices) {
@@ -183,17 +215,22 @@ std::vector<AudioAppSession> AppAudioRouter::enumerate_apps(const std::vector<Au
 
     IMMDeviceEnumerator* pEnum = nullptr;
     HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void**)&pEnum);
-    if (FAILED(hr) || !pEnum) return result;
+    if (FAILED(hr) || !pEnum) {
+        AT_LOG_ERROR("WINAPI", "CoCreateInstance(MMDeviceEnumerator) failed: hr=0x%08X", hr);
+        return result;
+    }
 
     IMMDeviceCollection* pCol = nullptr;
     hr = pEnum->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &pCol);
     if (FAILED(hr) || !pCol) {
+        AT_LOG_ERROR("WINAPI", "EnumAudioEndpoints(eRender) failed: hr=0x%08X", hr);
         pEnum->Release();
         return result;
     }
 
     UINT devCount = 0;
     pCol->GetCount(&devCount);
+    AT_LOG_DEBUG("WINAPI", "Enumerating audio sessions across %u active render devices...", devCount);
 
     for (UINT i = 0; i < devCount; ++i) {
         IMMDevice* pDev = nullptr;
@@ -309,11 +346,15 @@ std::vector<AudioAppSession> AppAudioRouter::enumerate_apps(const std::vector<Au
         return a.process_name < b.process_name;
     });
 
+    AT_LOG_INFO("APP/ROUTER", "Audio application enumeration complete: found %zu unique applications", result.size());
     return result;
 }
 
 bool AppAudioRouter::set_app_output_device(uint32_t pid, const std::string& process_name, const std::string& endpoint_id) {
     std::lock_guard<std::mutex> lock(router_mutex_);
+
+    AT_LOG_INFO("APP/ROUTER", "Routing request: app='%s', PID=%u -> Endpoint='%s'",
+                process_name.c_str(), pid, endpoint_id.empty() ? "[Default]" : endpoint_id.c_str());
 
     // Capture original state before making the first modification
     capture_original_if_missing(process_name, "");
@@ -332,6 +373,9 @@ bool AppAudioRouter::set_app_output_device(uint32_t pid, const std::string& proc
     // Also route any other running PIDs matching this process name (e.g. multi-process browsers)
     if (!process_name.empty() && process_name != "System Sounds") {
         auto sibling_pids = find_all_pids_for_process(process_name);
+        if (!sibling_pids.empty()) {
+            AT_LOG_DEBUG("APP/ROUTER", "Found %zu sibling processes for '%s'", sibling_pids.size(), process_name.c_str());
+        }
         for (DWORD s_pid : sibling_pids) {
             if (s_pid != pid) {
                 if (set_persisted_endpoint(s_pid, endpoint_w)) {
@@ -341,6 +385,9 @@ bool AppAudioRouter::set_app_output_device(uint32_t pid, const std::string& proc
         }
     }
 
+    if (!any_success) {
+        AT_LOG_WARN("APP/ROUTER", "Could not route process '%s' (PID %u): SetPersistedDefaultAudioEndpoint failed", process_name.c_str(), pid);
+    }
     return any_success;
 }
 
@@ -363,6 +410,7 @@ void AppAudioRouter::capture_original_if_missing(const std::string& process_name
 
 void AppAudioRouter::revert_all_to_original() {
     std::lock_guard<std::mutex> lock(router_mutex_);
+    AT_LOG_INFO("APP/ROUTER", "Restoring original system audio routing for %zu application(s)...", original_routing_.size());
     for (const auto& [proc, orig_endp] : original_routing_) {
         std::wstring endp_w = (orig_endp.empty() || orig_endp == "(default)" || orig_endp == "default")
                               ? L""
@@ -416,12 +464,15 @@ bool AppAudioRouter::save_preset(const std::string& name, const std::map<std::st
         std::ofstream f(fpath);
         if (!f.is_open()) {
             if (out_err) *out_err = "Failed to open file for writing: " + fpath.string();
+            AT_LOG_ERROR("FILESYSTEM", "Failed to open preset file for writing: %s", fpath.string().c_str());
             return false;
         }
         f << j.dump(2);
+        AT_LOG_INFO("FILESYSTEM", "Saved routing preset '%s' (%zu rules) to %s", name.c_str(), mapping.size(), fpath.string().c_str());
         return true;
     } catch (const std::exception& e) {
         if (out_err) *out_err = e.what();
+        AT_LOG_ERROR("FILESYSTEM", "Exception while saving preset '%s': %s", name.c_str(), e.what());
         return false;
     }
 }
@@ -433,11 +484,13 @@ bool AppAudioRouter::load_preset(const std::string& name, std::map<std::string, 
         auto fpath = pdir / (name + ".json");
         if (!std::filesystem::exists(fpath)) {
             if (out_err) *out_err = "Preset file not found: " + fpath.string();
+            AT_LOG_WARN("FILESYSTEM", "Preset file not found: %s", fpath.string().c_str());
             return false;
         }
         std::ifstream f(fpath);
         if (!f.is_open()) {
             if (out_err) *out_err = "Failed to open file: " + fpath.string();
+            AT_LOG_ERROR("FILESYSTEM", "Failed to open preset file: %s", fpath.string().c_str());
             return false;
         }
         json j;
@@ -450,9 +503,11 @@ bool AppAudioRouter::load_preset(const std::string& name, std::map<std::string, 
                 }
             }
         }
+        AT_LOG_INFO("FILESYSTEM", "Loaded routing preset '%s' (%zu rules) from %s", name.c_str(), out_mapping->size(), fpath.string().c_str());
         return true;
     } catch (const std::exception& e) {
         if (out_err) *out_err = e.what();
+        AT_LOG_ERROR("FILESYSTEM", "Exception while loading preset '%s': %s", name.c_str(), e.what());
         return false;
     }
 }
@@ -463,10 +518,12 @@ bool AppAudioRouter::delete_preset(const std::string& name, std::string* out_err
         auto fpath = pdir / (name + ".json");
         if (std::filesystem::exists(fpath)) {
             std::filesystem::remove(fpath);
+            AT_LOG_INFO("FILESYSTEM", "Deleted routing preset '%s' at %s", name.c_str(), fpath.string().c_str());
         }
         return true;
     } catch (const std::exception& e) {
         if (out_err) *out_err = e.what();
+        AT_LOG_ERROR("FILESYSTEM", "Exception while deleting preset '%s': %s", name.c_str(), e.what());
         return false;
     }
 }
@@ -498,9 +555,13 @@ void AppAudioRouter::load_state() {
                         if (v.is_string()) original_routing_[k] = v.get<std::string>();
                     }
                 }
+                AT_LOG_INFO("FILESYSTEM", "Loaded %zu original routing baseline mappings from %s",
+                            original_routing_.size(), orig_path.string().c_str());
             }
         }
-    } catch (...) {}
+    } catch (const std::exception& e) {
+        AT_LOG_ERROR("FILESYSTEM", "Error reading original routing baseline file: %s", e.what());
+    }
 
     // 2. Load router configuration (revert_on_exit)
     try {
@@ -513,9 +574,13 @@ void AppAudioRouter::load_state() {
                 if (j.contains("revert_on_exit")) {
                     revert_on_exit_ = j["revert_on_exit"].get<bool>();
                 }
+                AT_LOG_DEBUG("FILESYSTEM", "Loaded router configuration (revert_on_exit=%s) from %s",
+                             revert_on_exit_ ? "true" : "false", cfg_path.string().c_str());
             }
         }
-    } catch (...) {}
+    } catch (const std::exception& e) {
+        AT_LOG_ERROR("FILESYSTEM", "Error reading router config file: %s", e.what());
+    }
 }
 
 void AppAudioRouter::save_state() {
@@ -531,7 +596,9 @@ void AppAudioRouter::save_state() {
         if (f.is_open()) {
             f << j.dump(2);
         }
-    } catch (...) {}
+    } catch (const std::exception& e) {
+        AT_LOG_ERROR("FILESYSTEM", "Error writing original routing baseline file: %s", e.what());
+    }
 
     // 2. Save router configuration
     try {
@@ -543,7 +610,10 @@ void AppAudioRouter::save_state() {
         if (f.is_open()) {
             f << j.dump(2);
         }
-    } catch (...) {}
+    } catch (const std::exception& e) {
+        AT_LOG_ERROR("FILESYSTEM", "Error writing router config file: %s", e.what());
+    }
 }
 
 } // namespace at
+

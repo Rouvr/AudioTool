@@ -1,5 +1,6 @@
 #include "engine/AudioEngine.h"
 #include "common/AppPathsAndRegistry.h"
+#include "common/Logger.h"
 #include "nlohmann/json.hpp"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -40,28 +41,36 @@ bool AudioEngine::initialize(const EngineConfig& cfg, std::string* out_error) {
     Lock lock(graph_mutex_);
     config_ = cfg;
 
+    AT_LOG_INFO("ENGINE", "Initializing AudioEngine (Sample Rate: %u Hz, Buffer: %u frames)...",
+                config_.sample_rate, config_.buffer_size_frames);
+
     if (!AppPathsAndRegistry::ensure_directories_exist(out_error)) {
+        AT_LOG_ERROR("ENGINE", "Failed to ensure application directories: %s", out_error ? out_error->c_str() : "unknown");
         return false;
     }
 
     if (!AppPathsAndRegistry::write_registry_metadata(out_error)) {
-        return false;
+        AT_LOG_WARN("ENGINE", "Failed to write registry metadata: %s", out_error ? out_error->c_str() : "unknown");
+        // Non-fatal, continue initialization
     }
 
     device_manager_.prepare_all(config_.sample_rate, config_.buffer_size_frames);
 
     std::vector<std::string> scan_errors;
-    plugin_manager_.scan_plugins_directory(AppPathsAndRegistry::get_plugins_dir(), &scan_errors);
+    size_t loaded_plugins = plugin_manager_.scan_plugins_directory(AppPathsAndRegistry::get_plugins_dir(), &scan_errors);
+    AT_LOG_INFO("ENGINE", "Plugins scan complete: %zu plugin(s) available in engine", loaded_plugins);
 
     return true;
 }
 
 void AudioEngine::shutdown() {
+    AT_LOG_INFO("ENGINE", "Shutting down AudioEngine...");
     stop_realtime_loop();
 
     Lock lock(graph_mutex_);
     profiles_.clear();
     plugin_manager_.unload_all();
+    AT_LOG_INFO("ENGINE", "AudioEngine shutdown complete.");
 }
 
 bool AudioEngine::reload_config(const EngineConfig& new_cfg, std::string* out_error) {
@@ -198,9 +207,11 @@ bool AudioEngine::close_profile(uint32_t profile_id) {
 ProfileGraph* AudioEngine::load_profile(const std::filesystem::path& file, std::string* out_error) {
     Lock lock(graph_mutex_);
     try {
+        AT_LOG_INFO("FILESYSTEM", "Loading workspace profile from %s", file.string().c_str());
         std::ifstream f(file);
         if (!f.is_open()) {
             if (out_error) *out_error = "Could not open profile file: " + file.string();
+            AT_LOG_ERROR("FILESYSTEM", "Failed to open profile file: %s", file.string().c_str());
             return nullptr;
         }
         json j;
@@ -409,13 +420,17 @@ bool AudioEngine::save_profile(uint32_t profile_id, const std::filesystem::path&
         std::ofstream f(file);
         if (!f.is_open()) {
             if (out_error) *out_error = "Could not open file for writing: " + file.string();
+            AT_LOG_ERROR("FILESYSTEM", "Failed to open profile file for writing: %s", file.string().c_str());
             return false;
         }
         f << j.dump(2);
         prof->set_file_path(file.string());
+        AT_LOG_INFO("FILESYSTEM", "Saved workspace profile '%s' (%zu nodes, %zu routing rules) to %s",
+                    snap.meta.name.c_str(), snap.nodes.size(), snap.app_routing.size(), file.string().c_str());
         return true;
     } catch (const std::exception& e) {
         if (out_error) *out_error = e.what();
+        AT_LOG_ERROR("FILESYSTEM", "Exception while saving profile to %s: %s", file.string().c_str(), e.what());
         return false;
     }
 }

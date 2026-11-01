@@ -10,6 +10,7 @@
 
 #include "at_version.h"
 #include "common/AppPathsAndRegistry.h"
+#include "common/Logger.h"
 #include "engine/AudioEngine.h"
 #include "engine/AudioGraphEngine.h"
 #include "gui/CanvasRenderer.h"
@@ -464,6 +465,71 @@ bool test_8_app_audio_router_and_profile_persistence() {
     return true;
 }
 
+bool test_9_robust_logging_and_rotation() {
+    std::cout << "[TEST 9] Verifying Robust Logging, Dual-File Persistence, and X-Retention Rotation...\n";
+
+    auto& logger = at::Logger::instance();
+    logger.shutdown(); // ensure clean state
+
+    auto logs_dir = at::AppPathsAndRegistry::get_logs_dir();
+    std::filesystem::create_directories(logs_dir);
+
+    // Create 7 dummy dated log files to test retention rotation
+    for (int i = 1; i <= 7; ++i) {
+        char dummy_name[64];
+        std::snprintf(dummy_name, sizeof(dummy_name), "audiotool_2026-01-%02d_12-00-00.log", i);
+        std::ofstream f(logs_dir / dummy_name);
+        f << "Dummy historical log " << i << "\n";
+    }
+
+    // Initialize with max_retained_logs = 5
+    TEST_ASSERT(logger.init(5, at::LogLevel::Debug), "Logger initialization failed");
+    logger.install_crash_handler();
+
+    // Verify current log file and latest.log exist
+    std::filesystem::path current_log = logger.get_current_log_path();
+    std::filesystem::path latest_log = logger.get_latest_log_path();
+
+    TEST_ASSERT(!current_log.empty() && std::filesystem::exists(current_log), "Timestamped log file does not exist: " + current_log.string());
+    TEST_ASSERT(!latest_log.empty() && std::filesystem::exists(latest_log), "latest.log does not exist: " + latest_log.string());
+
+    // Write diagnostic messages across subsystems
+    AT_LOG_DEBUG("TEST", "Debug diagnostic entry %d", 42);
+    AT_LOG_INFO("FILESYSTEM", "Testing filesystem error triage log");
+    AT_LOG_WARN("WINAPI", "Simulated WinAPI warning: SetEventHandle returned pending state");
+    AT_LOG_ERROR("COM/POLICY", "Simulated COM error HRESULT=0x80004002");
+
+    logger.flush();
+
+    // Verify content is in both files
+    std::ifstream cur_f(current_log);
+    std::string cur_content((std::istreambuf_iterator<char>(cur_f)), std::istreambuf_iterator<char>());
+    TEST_ASSERT(cur_content.find("Testing filesystem error triage log") != std::string::npos, "Message missing from timestamped log");
+    TEST_ASSERT(cur_content.find("COM/POLICY") != std::string::npos, "COM/POLICY missing from timestamped log");
+
+    std::ifstream lat_f(latest_log);
+    std::string lat_content((std::istreambuf_iterator<char>(lat_f)), std::istreambuf_iterator<char>());
+    TEST_ASSERT(lat_content.find("Testing filesystem error triage log") != std::string::npos, "Message missing from latest.log");
+
+    // Verify log retention: total number of audiotool_*.log files should be <= 5
+    size_t count = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(logs_dir)) {
+        if (entry.is_regular_file()) {
+            std::string name = entry.path().filename().string();
+            if (name.rfind("audiotool_", 0) == 0 && entry.path().extension() == ".log") {
+                ++count;
+            }
+        }
+    }
+    TEST_ASSERT(count <= 5, "Log retention failed: expected <= 5 files, found " + std::to_string(count));
+
+    // Oldest dummy files (e.g. 2026-01-01) should have been pruned
+    TEST_ASSERT(!std::filesystem::exists(logs_dir / "audiotool_2026-01-01_12-00-00.log"), "Oldest dummy log was not deleted");
+
+    std::cout << "  -> Passed! Logging verified with " << count << " retained logs and live latest.log.\n";
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -482,9 +548,10 @@ int main() {
     if (!test_6_volume_node_mixing_and_normalization()) return 1;
     if (!test_7_gui_canvas_controls_and_row_alignment()) return 1;
     if (!test_8_app_audio_router_and_profile_persistence()) return 1;
+    if (!test_9_robust_logging_and_rotation()) return 1;
 
     std::cout << "====================================================================\n";
-    std::cout << " ALL 8 AUTOMATED PROOF-OF-CONCEPT TESTS PASSED SUCCESSFULLY!\n";
+    std::cout << " ALL 9 AUTOMATED PROOF-OF-CONCEPT TESTS PASSED SUCCESSFULLY!\n";
     std::cout << "====================================================================\n";
     return 0;
 }

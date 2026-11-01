@@ -49,6 +49,7 @@ target_link_libraries(imgui PUBLIC d3d11 dxgi d3dcompiler)
 # ----------------------------------------------------------------------------
 add_library(at_engine STATIC
     src/common/AppPathsAndRegistry.cpp
+    src/common/Logger.cpp
     src/engine/DeviceManager.cpp
     src/engine/PluginManager.cpp
     src/engine/ProfileGraph.cpp

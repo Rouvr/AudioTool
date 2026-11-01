@@ -4,6 +4,7 @@
 
 #include "at_version.h"
 #include "common/AppPathsAndRegistry.h"
+#include "common/Logger.h"
 #include "engine/AudioEngine.h"
 #include "gui/CanvasRenderer.h"
 
@@ -68,6 +69,10 @@ std::string OpenProfileFileDialog(HWND hWnd, bool is_save) {
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     at::AppPathsAndRegistry::harden_dll_search_order();
+    at::Logger::instance().init(10, at::LogLevel::Debug);
+    at::Logger::instance().install_crash_handler();
+    AT_LOG_INFO("GUI", "AudioTool Native GUI started. Version: %s | Build ID: %s | PID: %lu",
+                AT_VERSION_STRING, AT_BUILD_ID, GetCurrentProcessId());
 
     // 1. Initialize Audio Engine
     at::AudioEngine engine;
@@ -785,6 +790,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     DestroyWindow(hwnd);
     UnregisterClassW(wc.lpszClassName, wc.hInstance);
 
+    AT_LOG_INFO("GUI", "AudioTool Native GUI exited cleanly.");
+    at::Logger::instance().flush();
+    at::Logger::instance().shutdown();
+
     return 0;
 }
 
@@ -813,9 +822,12 @@ bool CreateDeviceD3D(HWND hWnd) {
     HRESULT res = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, createDeviceFlags, featureLevelArray, 2, D3D11_SDK_VERSION, &sd, &g_pSwapChain, &g_pd3dDevice, &featureLevel, &g_pd3dDeviceContext);
     if (res == DXGI_ERROR_UNSUPPORTED)
         res = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, createDeviceFlags, featureLevelArray, 2, D3D11_SDK_VERSION, &sd, &g_pSwapChain, &g_pd3dDevice, &featureLevel, &g_pd3dDeviceContext);
-    if (res != S_OK)
+    if (res != S_OK) {
+        AT_LOG_ERROR("WINAPI", "D3D11CreateDeviceAndSwapChain failed: hr=0x%08X", res);
         return false;
+    }
 
+    AT_LOG_INFO("WINAPI", "D3D11 device and swapchain created successfully (Feature Level: 0x%04X)", featureLevel);
     CreateRenderTarget();
     return true;
 }
@@ -854,6 +866,7 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return 0;
         break;
     case WM_DESTROY:
+        AT_LOG_INFO("GUI", "WM_DESTROY received in WndProc; posting quit message");
         PostQuitMessage(0);
         return 0;
     }

@@ -1,4 +1,5 @@
 #include "engine/DeviceManager.h"
+#include "common/Logger.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -209,6 +210,7 @@ std::vector<AudioDeviceInfo> DeviceManager::enumerate_devices() const {
     HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
                                   reinterpret_cast<void**>(&enumerator));
     if (FAILED(hr) || !enumerator) {
+        AT_LOG_ERROR("WASAPI", "CoCreateInstance(MMDeviceEnumerator) failed: hr=0x%08X", hr);
         return list;
     }
 
@@ -537,6 +539,7 @@ void DeviceManager::wasapi_worker_loop(HiddenMasterDevice* dev) {
 
     DWORD task_idx = 0;
     HANDLE hMmcss = AvSetMmThreadCharacteristicsW(L"Pro Audio", &task_idx);
+    AT_LOG_INFO("WASAPI", "WASAPI worker loop started for endpoint '%s' (MMCSS Pro Audio handle=%p)", dev->endpoint_key.c_str(), hMmcss);
 
     IMMDeviceEnumerator* enumerator     = nullptr;
     IMMDevice*           mm_dev         = nullptr;
@@ -546,7 +549,10 @@ void DeviceManager::wasapi_worker_loop(HiddenMasterDevice* dev) {
     WAVEFORMATEX*        mix_fmt        = nullptr;
     HANDLE               buffer_event   = nullptr;
 
-    auto fail = [&](const std::string& msg) { dev->set_status(AT_DEVICE_STATUS_FAILED, msg); };
+    auto fail = [&](const std::string& msg) {
+        AT_LOG_ERROR("WASAPI", "WASAPI failure on '%s': %s", dev->endpoint_key.c_str(), msg.c_str());
+        dev->set_status(AT_DEVICE_STATUS_FAILED, msg);
+    };
 
     do {
         HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),

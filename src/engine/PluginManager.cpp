@@ -1,5 +1,6 @@
 #include "engine/PluginManager.h"
 #include "common/AppPathsAndRegistry.h"
+#include "common/Logger.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -60,6 +61,7 @@ bool PluginManager::load_plugin_dll(
         if (out_error) {
             *out_error = "Security policy blocked plugin DLL with Internet Mark-of-the-Web (Zone.Identifier): " + dll_path.string();
         }
+        AT_LOG_WARN("SECURITY", "Blocked untrusted plugin DLL with Internet Mark-of-the-Web: %s", dll_path.string().c_str());
         return false;
     }
 
@@ -77,13 +79,17 @@ bool PluginManager::load_plugin_dll(
 
     if (!std::filesystem::copy_file(dll_path, shadow_path, std::filesystem::copy_options::overwrite_existing, ec)) {
         if (out_error) *out_error = "Failed to shadow-copy plugin DLL to: " + shadow_path.string();
+        AT_LOG_ERROR("FILESYSTEM", "Failed to shadow-copy plugin DLL '%s' -> '%s': %s",
+                     dll_path.string().c_str(), shadow_path.string().c_str(), ec.message().c_str());
         return false;
     }
 
     const std::filesystem::path abs_shadow = std::filesystem::absolute(shadow_path, ec);
     HMODULE hMod = LoadLibraryExW(abs_shadow.wstring().c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
     if (!hMod) {
-        if (out_error) *out_error = "LoadLibraryExW failed for: " + abs_shadow.string();
+        DWORD gle = GetLastError();
+        if (out_error) *out_error = "LoadLibraryExW failed for: " + abs_shadow.string() + " (GLE=" + std::to_string(gle) + ")";
+        AT_LOG_ERROR("WINAPI", "LoadLibraryExW failed for '%s': GLE=%lu", abs_shadow.string().c_str(), gle);
         return false;
     }
 
@@ -93,6 +99,7 @@ bool PluginManager::load_plugin_dll(
         FreeLibrary(hMod);
         std::filesystem::remove(shadow_path, ec);
         if (out_error) *out_error = "DLL missing at_get_plugin_bundle symbol: " + dll_path.string();
+        AT_LOG_ERROR("PLUGIN", "Plugin DLL '%s' missing exported entry symbol '%s'", dll_path.string().c_str(), AT_PLUGIN_ENTRY_SYMBOL_NAME);
         return false;
     }
 
@@ -101,6 +108,8 @@ bool PluginManager::load_plugin_dll(
         FreeLibrary(hMod);
         std::filesystem::remove(shadow_path, ec);
         if (out_error) *out_error = "Incompatible AT_ABI_VERSION in plugin: " + dll_path.string();
+        AT_LOG_WARN("PLUGIN", "Plugin '%s' ABI incompatible (expected 0x%08X, got 0x%08X)",
+                    dll_path.string().c_str(), AT_ABI_VERSION, bundle ? bundle->abi_version : 0);
         return false;
     }
 
@@ -142,7 +151,9 @@ bool PluginManager::load_plugin_dll(
     reg->module_handle        = hMod;
     reg->bundle               = bundle;
 
+    std::string disp_name = reg->display_name;
     plugins_[plugin_id] = std::move(reg);
+    AT_LOG_INFO("PLUGIN", "Registered plugin '%s' [%s] from %s", plugin_id.c_str(), disp_name.c_str(), dll_path.string().c_str());
     return true;
 }
 

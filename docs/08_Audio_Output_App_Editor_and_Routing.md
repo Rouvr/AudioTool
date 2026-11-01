@@ -59,3 +59,4 @@ To ensure user system audio settings are not permanently disturbed by AudioTool 
 1. The checkbox `"Revert to original configuration upon exit"` is enabled by default.
 2. In `WinMain()`, before exiting the message loop and destroying the window, AudioTool inspects `engine.audio_router().get_revert_on_exit()`.
 3. If true, `revert_all_to_original()` iterates over all known processes and resets their audio endpoints back to the original baseline captured before AudioTool intervened.
+
