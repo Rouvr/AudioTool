@@ -18,7 +18,9 @@
 
 #include <cmath>
 #include <cstring>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -503,12 +505,16 @@ bool test_9_robust_logging_and_rotation() {
 
     // Verify content is in both files
     std::ifstream cur_f(current_log);
-    std::string cur_content((std::istreambuf_iterator<char>(cur_f)), std::istreambuf_iterator<char>());
+    std::stringstream cur_ss;
+    cur_ss << cur_f.rdbuf();
+    std::string cur_content = cur_ss.str();
     TEST_ASSERT(cur_content.find("Testing filesystem error triage log") != std::string::npos, "Message missing from timestamped log");
     TEST_ASSERT(cur_content.find("COM/POLICY") != std::string::npos, "COM/POLICY missing from timestamped log");
 
     std::ifstream lat_f(latest_log);
-    std::string lat_content((std::istreambuf_iterator<char>(lat_f)), std::istreambuf_iterator<char>());
+    std::stringstream lat_ss;
+    lat_ss << lat_f.rdbuf();
+    std::string lat_content = lat_ss.str();
     TEST_ASSERT(lat_content.find("Testing filesystem error triage log") != std::string::npos, "Message missing from latest.log");
 
     // Verify log retention: total number of audiotool_*.log files should be <= 5
