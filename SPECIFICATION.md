@@ -10,7 +10,7 @@ The system separates **Audio Stream Processing** (real-time continuous sample st
 
 ## 2. Specification Document Index
 
-This specification is organized into six detailed engineering documents located in the [`docs/`](file:///d:/Code/AudioTool/docs) directory:
+This specification is organized into nine detailed engineering documents located in the [`docs/`](file:///d:/Code/AudioTool/docs) directory:
 
 1. **[01 — Architecture, Audio Engine & Control Loops](file:///d:/Code/AudioTool/docs/01_Architecture_and_Control_Loops.md)**
    - High-level system architecture and thread model.
@@ -42,6 +42,20 @@ This specification is organized into six detailed engineering documents located 
    - Windows Registry specification under `HKEY_CURRENT_USER\Software\Rouvr\AudioTool` (`InstallPath`, `LocalDataPath`, `Version`, `BuildId`).
    - How to run unsigned local builds safely on Windows without weakening security for downloaded applications (DLL search order hardening, Mark-of-the-Web isolation, and optional Local-Only Self-Signed Code Signing).
    - Standardized CMake + `Makefile` / `build.ps1` pipeline that reads manual version from `VERSION.txt`, generates a unique `AT_BUILD_ID` in `include/at_version.h`, commits changes to Git, builds the project, deploys plugins, and runs automated tests.
+7. **[07 — VolumeNode, Virtual Audio Cable & GUI Implementation Notes](file:///d:/Code/AudioTool/docs/07_VolumeNode_VirtualAudioCable_and_GUI_Implementation.md)**
+   - Verification of mixing browser/game and microphone outputs via VB-Audio Virtual Cable.
+   - Complete implementation of `VolumeNode` with multi-channel decibel/linear gain, mute toggle, and SIMD processing.
+   - Standalone DirectX 11 + Dear ImGui frontend executable (`at_gui.exe`).
+8. **[08 — Audio Output App Editor & Routing](file:///d:/Code/AudioTool/docs/08_Audio_Output_App_Editor_and_Routing.md)**
+   - Windows 10/11 per-application audio endpoint routing via undocumented `AudioPolicyConfig` COM interface.
+   - Active audio session enumeration, process metadata extraction, and dynamic device redirection.
+   - Global baseline snapshot, exit reversion safety checkbox, and profile-based preset management.
+9. **[09 — Robust Logging & Crash Diagnostics](file:///d:/Code/AudioTool/docs/09_Robust_Logging_and_Crash_Diagnostics.md)**
+   - Deterministic structured logging format across subsystems (`[WINAPI]`, `[FILESYSTEM]`, `[COM/POLICY]`, `[WASAPI]`, `[PLUGIN]`, `[CRASH]`).
+   - Dual-file persistence (`latest.log` + timestamped `audiotool_YYYY-MM-DD_HH-MM-SS.log`) under `%LOCALAPPDATA%\Rouvr\AudioTool\logs\`.
+   - Automatic $X$-file retention rotation policy.
+   - Windows SEH unhandled exception crash handler capturing access violation types, target addresses, faulting module + offset, and full 64-bit CPU register states.
+   - Strict real-time safety guarantee: zero logging on the audio thread.
 
 ---
 
@@ -115,6 +129,9 @@ AudioTool/
 ```text
 %LOCALAPPDATA%\Rouvr\AudioTool\
 ├── config.json                        # User-configurable engine constants (buffer size, sample rate)
+├── logs/                              # Diagnostic log sessions and latest live log
+│   ├── latest.log                     # Active live session log
+│   └── audiotool_YYYY-MM-DD_HH-MM-SS.log # Retained previous logs (last X sessions)
 ├── profiles/                          # Saved JSON workspace profiles (*.atprof)
 ├── plugins/                           # Runtime directory scanned for Node DLLs
 │   ├── Audio/
