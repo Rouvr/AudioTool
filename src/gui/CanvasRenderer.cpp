@@ -707,7 +707,7 @@ bool CanvasRenderer::render_nodes(
                             profile.set_control(node.node_id, ctrl.control_id, OwnedValue::make_float(fval));
                         }
                     }
-                } else if (ctrl.control_type == AT_CTRL_BUTTON || ctrl.control_type == AT_CTRL_TOGGLE_SWITCH) {
+                } else if (ctrl.control_type == AT_CTRL_BUTTON) {
                     bool bval = ctrl.value.bool_val;
                     if (bval) {
                         ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(210, 75, 45, 255));

@@ -7,6 +7,9 @@
 #include "engine/AudioEngine.h"
 #include "gui/CanvasRenderer.h"
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <d3d11.h>
@@ -17,6 +20,7 @@
 #include "backends/imgui_impl_win32.h"
 #include "backends/imgui_impl_dx11.h"
 
+#include <algorithm>
 #include <iostream>
 #include <string>
 #include <vector>
