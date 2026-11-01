@@ -649,14 +649,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
                     ImGui::TableHeadersRow();
 
                     std::string filter_str = app_filter_buf;
-                    std::transform(filter_str.begin(), filter_str.end(), filter_str.begin(), ::tolower);
+                    std::transform(filter_str.begin(), filter_str.end(), filter_str.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
                     int row_idx = 0;
                     for (auto& app : cached_audio_apps) {
                         std::string proc_lower = app.process_name;
                         std::string disp_lower = app.display_name;
-                        std::transform(proc_lower.begin(), proc_lower.end(), proc_lower.begin(), ::tolower);
-                        std::transform(disp_lower.begin(), disp_lower.end(), disp_lower.begin(), ::tolower);
+                        std::transform(proc_lower.begin(), proc_lower.end(), proc_lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                        std::transform(disp_lower.begin(), disp_lower.end(), disp_lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
                         if (!filter_str.empty()) {
                             if (proc_lower.find(filter_str) == std::string::npos &&
