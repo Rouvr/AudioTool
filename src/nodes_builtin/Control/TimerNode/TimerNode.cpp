@@ -221,3 +221,4 @@ extern "C" AT_PLUGIN_EXPORT const AT_PluginExportBundle* AT_CDECL at_get_plugin_
     }
     return &kBundle;
 }
+

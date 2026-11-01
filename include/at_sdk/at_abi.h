@@ -229,7 +229,32 @@ typedef struct AT_HostServices {
         const float* const* in_planar_channels,
         uint32_t num_channels,
         uint32_t num_frames);
+
+    // [ABI 1.0 extension, appended] Queries the state of a Hidden Master Device.
+    // Writes a short UTF-8 human-readable status message into msg_buf (may be NULL).
+    // Returns one of AT_DeviceStatus.
+    int32_t (AT_CDECL *get_hardware_device_status)(
+        void* host_context,
+        AT_DeviceStreamHandle stream_handle,
+        char* msg_buf,
+        uint32_t msg_buf_len);
 } AT_HostServices;
+
+typedef enum AT_DeviceStatus {
+    AT_DEVICE_STATUS_NONE     = 0, // No device bound
+    AT_DEVICE_STATUS_STARTING = 1, // Stream is being opened
+    AT_DEVICE_STATUS_RUNNING  = 2, // Stream is running
+    AT_DEVICE_STATUS_FAILED   = 3  // Stream failed to open / device lost
+} AT_DeviceStatus;
+
+// Device endpoint ID conventions understood by the host DeviceManager:
+//   "default_input"           -> default Windows capture endpoint
+//   "default_output"          -> default Windows render endpoint
+//   "loopback:default_output" -> WASAPI loopback capture of the default render endpoint
+//   "loopback:<endpoint id>"  -> WASAPI loopback capture of a specific render endpoint
+//   "<endpoint id>"           -> specific Windows endpoint (e.g. "{0.0.1.00000000}.{guid}")
+//   "virtual://<name>"        -> in-memory endpoint used for automated tests
+#define AT_LOOPBACK_PREFIX "loopback:"
 
 // ----------------------------------------------------------------------------
 // Node Instance VTable & Plugin Export Bundle
@@ -277,6 +302,15 @@ typedef struct AT_NodeVTable {
 
     // Control Plane Tick Callback (Used by Control Nodes like TimerNode)
     void      (AT_CDECL *tick_control)(AT_NodeHandle handle, uint64_t timestamp_ns);
+
+    // [ABI 1.0 extension, appended, optional] Called (never on the audio thread) after the
+    // audio connections changed. Lists the upstream nodes in exactly the order in which
+    // AT_AudioProcessContext::input_buses will be supplied. Arrays are only valid during the call.
+    void      (AT_CDECL *on_input_sources_changed)(
+        AT_NodeHandle handle,
+        uint32_t input_count,
+        const uint32_t* source_node_ids,
+        const char* const* source_node_names);
 } AT_NodeVTable;
 
 typedef struct AT_PluginExportBundle {
@@ -295,3 +329,4 @@ typedef const AT_PluginExportBundle* (AT_CDECL *AT_GetPluginBundleFn)(uint32_t h
 #ifdef __cplusplus
 }
 #endif
+

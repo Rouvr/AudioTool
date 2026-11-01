@@ -112,9 +112,16 @@ bool PluginManager::load_plugin_dll(
         return false;
     }
 
-    // If an older version of this plugin_id was loaded, unload it first
+    // If an older version of this plugin_id was loaded, replace it - but only if no live node
+    // instances still execute code from the old module (FreeLibrary would crash them).
     auto existing_it = plugins_.find(plugin_id);
     if (existing_it != plugins_.end()) {
+        if (can_replace_ && !can_replace_(plugin_id)) {
+            FreeLibrary(hMod);
+            std::filesystem::remove(shadow_path, ec);
+            if (out_error) *out_error = "Plugin '" + plugin_id + "' kept: live instances exist (delete them to hot-reload).";
+            return false;
+        }
         if (existing_it->second->module_handle) {
             FreeLibrary(static_cast<HMODULE>(existing_it->second->module_handle));
         }

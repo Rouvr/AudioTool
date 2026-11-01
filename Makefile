@@ -21,3 +21,4 @@ devices:
 
 clean:
 	powershell -NoProfile -Command "if (Test-Path build) { Remove-Item -Recurse -Force build }"
+

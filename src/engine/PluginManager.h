@@ -6,6 +6,7 @@
 #include "at_sdk/at_abi.h"
 
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -47,10 +48,16 @@ public:
     // Returns list of all registered plugins
     std::vector<const RegisteredPlugin*> list_plugins() const;
 
+    // Predicate consulted before an already-loaded plugin_id is replaced by a newer DLL
+    // (must return false while live node instances of that plugin exist).
+    void set_replace_predicate(std::function<bool(const std::string&)> pred) { can_replace_ = std::move(pred); }
+
 private:
+    std::function<bool(const std::string&)>                         can_replace_;
     mutable std::mutex                                              mutex_;
     std::unordered_map<std::string, std::unique_ptr<RegisteredPlugin>> plugins_;
     uint64_t                                                        shadow_counter_ = 0;
 };
 
 } // namespace at
+

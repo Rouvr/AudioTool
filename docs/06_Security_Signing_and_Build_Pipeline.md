@@ -117,3 +117,4 @@ For familiarity with Linux `cmake` and `make` workflows, the project provides:
    - **Step 3:** Stages and commits any pending changes to Git (`git add -A && git commit -m "Build <Version> [<BuildId>]"`).
    - **Step 4:** Runs `cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release` and `cmake --build build` using the Visual Studio 2022 MSVC x64 toolchain.
    - **Step 5:** Deploys compiled node plugin DLLs to `%LOCALAPPDATA%\Rouvr\AudioTool\plugins\...` and runs `ctest --test-dir build --output-on-failure`.
+

@@ -109,3 +109,4 @@ target_link_libraries(at_poc_tests PRIVATE at_engine)
 add_dependencies(at_poc_tests VirtualInputNode OutputNode TimerNode)
 
 add_test(NAME AudioTool_PoC_Tests COMMAND at_poc_tests)
+

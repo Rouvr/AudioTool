@@ -57,6 +57,15 @@ public:
     uint32_t capacity_frames() const noexcept { return capacity_frames_; }
     uint32_t channels() const noexcept { return channels_; }
 
+    // Consumer-side only: discards up to num_frames of the oldest frames.
+    // Used for latency clamping when a producer clock runs faster than the consumer clock.
+    uint32_t skip(uint32_t num_frames) noexcept {
+        const uint32_t to_skip = std::min(num_frames, available_to_read());
+        const uint32_t r = read_pos_.load(std::memory_order_relaxed);
+        read_pos_.store(r + to_skip, std::memory_order_release);
+        return to_skip;
+    }
+
     // Push planar stereo/multi-channel frames into the ring buffer
     uint32_t push_planar(const float* const* in_channels, uint32_t num_channels, uint32_t num_frames) noexcept {
         const uint32_t avail = available_to_write();

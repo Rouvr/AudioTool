@@ -229,3 +229,4 @@ bool AppPathsAndRegistry::has_internet_mark_of_the_web(const std::filesystem::pa
 }
 
 } // namespace at
+
