@@ -88,11 +88,6 @@ std::string extract_endpoint_id_from_full(const std::wstring& full_id) {
     }
     return (end > start) ? utf8_encode(full_id.substr(start, end - start)) : "";
 }
-    if (needed <= 0) return {};
-    std::wstring result(static_cast<size_t>(needed), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, str.data(), static_cast<int>(str.size()), result.data(), needed);
-    return result;
-}
 
 std::vector<DWORD> find_all_pids_for_process(const std::string& process_name) {
     std::vector<DWORD> pids;
