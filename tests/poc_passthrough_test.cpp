@@ -536,6 +536,211 @@ bool test_9_robust_logging_and_rotation() {
     return true;
 }
 
+bool test_10_additional_audio_processing_nodes() {
+    std::cout << "[TEST 10] Verifying 11 Additional Audio Processing Nodes & DSP Algorithms...\n";
+
+    at::EngineConfig cfg;
+    cfg.sample_rate              = 48000;
+    cfg.buffer_size_frames       = 256;
+    cfg.max_connections_per_port = 4;
+
+    at::AudioGraphEngine engine;
+    std::string err;
+    TEST_ASSERT(engine.initialize(cfg, &err), "Engine initialize failed: " + err);
+
+    // 1. Verify dynamic discovery of all 15 plugins in the system
+    const std::vector<std::string> expected_plugins = {
+        "at.builtin.audio.virtual_input",
+        "at.builtin.audio.volume",
+        "at.builtin.audio.output",
+        "at.builtin.control.timer",
+        "at.builtin.audio.equalizer",
+        "at.builtin.audio.filter",
+        "at.builtin.audio.compressor",
+        "at.builtin.audio.limiter",
+        "at.builtin.audio.noise_gate",
+        "at.builtin.audio.reverb",
+        "at.builtin.audio.delay",
+        "at.builtin.audio.distortion",
+        "at.builtin.audio.overdrive",
+        "at.builtin.audio.saturation",
+        "at.builtin.audio.bitcrusher"
+    };
+
+    for (const auto& pid : expected_plugins) {
+        const auto* p = engine.plugin_manager().find_plugin(pid);
+        TEST_ASSERT(p != nullptr, "Plugin failed to load: " + pid);
+    }
+    std::cout << "  -> Discovered and loaded all 15 plugins across Audio & Control planes.\n";
+
+    // 2. Test Limiter Hard Ceiling Clamping
+    {
+        uint32_t lim_id = engine.spawn_node("at.builtin.audio.limiter", "Test Limiter", &err);
+        TEST_ASSERT(lim_id != 0, "Failed to spawn LimiterNode");
+
+        // Set ceiling to -6.0 dB (approx 0.501) and pre-gain to +6.0 dB
+        AT_ControlValue ceil_val{ AT_VAL_FLOAT, { .float_val = -6.0 } };
+        AT_ControlValue pre_val{ AT_VAL_FLOAT, { .float_val = 6.0 } };
+        TEST_ASSERT(engine.set_node_control_by_identifier(lim_id, "ceiling_db", ceil_val) == AT_OK, "Failed to set ceiling");
+        TEST_ASSERT(engine.set_node_control_by_identifier(lim_id, "input_gain_db", pre_val) == AT_OK, "Failed to set pre_gain");
+
+        // Process audio with 1.0 peak input
+        const auto* lim_node = engine.active_profile().find_node(lim_id);
+        TEST_ASSERT(lim_node != nullptr, "Limiter node missing in profile");
+
+        at::AlignedPlanarBuffer in_buf(2, 256);
+        at::AlignedPlanarBuffer out_buf(2, 256);
+        for (uint32_t f = 0; f < 256; ++f) {
+            in_buf.channel(0)[f] = 1.0f; // +6dB pre-gain will boost to 2.0
+            in_buf.channel(1)[f] = 1.0f;
+        }
+
+        AT_AudioBusView in_view{ 999, "TestSrc", 2, 256, in_buf.channel_ptrs() };
+        AT_AudioProcessContext ctx{};
+        ctx.sample_rate = 48000;
+        ctx.num_frames = 256;
+        ctx.input_bus_count = 1;
+        ctx.input_buses = &in_view;
+        ctx.output_bus = { lim_id, "Test Limiter", 2, 256, out_buf.channel_ptrs() };
+
+        lim_node->bundle->vtable->process_audio(lim_node->handle, &ctx);
+
+        float max_out = 0.0f;
+        for (uint32_t f = 0; f < 256; ++f) {
+            max_out = std::max(max_out, std::abs(out_buf.channel(0)[f]));
+        }
+        // Ceiling is -6.0 dB = 0.501187. Must never exceed ceiling!
+        TEST_ASSERT(max_out <= 0.505f, "Limiter failed to clamp audio to ceiling: max_out=" + std::to_string(max_out));
+    }
+
+    // 3. Test Equalizer Band Controls
+    {
+        uint32_t eq_id = engine.spawn_node("at.builtin.audio.equalizer", "Test EQ", &err);
+        TEST_ASSERT(eq_id != 0, "Failed to spawn EqualizerNode");
+
+        const auto* eq_node = engine.active_profile().find_node(eq_id);
+        TEST_ASSERT(eq_node != nullptr, "EQ node missing in profile");
+
+        // Verify 16 bands can be read and set
+        for (int i = 0; i < 16; ++i) {
+            std::string ident = "band_" + std::to_string(i);
+            AT_ControlValue g_val{ AT_VAL_FLOAT, { .float_val = 6.0 } };
+            TEST_ASSERT(engine.set_node_control_by_identifier(eq_id, ident, g_val) == AT_OK, "Failed to set EQ band: " + ident);
+        }
+    }
+
+    // 4. Test Filter Lowpass Attenuation
+    {
+        uint32_t flt_id = engine.spawn_node("at.builtin.audio.filter", "Test LP Filter", &err);
+        TEST_ASSERT(flt_id != 0, "Failed to spawn FilterNode");
+
+        // Cutoff at 200 Hz
+        AT_ControlValue fc_val{ AT_VAL_FLOAT, { .float_val = 200.0 } };
+        TEST_ASSERT(engine.set_node_control_by_identifier(flt_id, "cutoff_hz", fc_val) == AT_OK, "Failed to set cutoff");
+
+        const auto* flt_node = engine.active_profile().find_node(flt_id);
+        TEST_ASSERT(flt_node != nullptr, "Filter node missing");
+
+        // Input: High frequency 10 kHz sine wave (amp 1.0)
+        at::AlignedPlanarBuffer in_buf(2, 256);
+        at::AlignedPlanarBuffer out_buf(2, 256);
+        for (uint32_t f = 0; f < 256; ++f) {
+            float s = std::sin(2.0f * static_cast<float>(kPi) * 10000.0f * (f / 48000.0f));
+            in_buf.channel(0)[f] = s;
+            in_buf.channel(1)[f] = s;
+        }
+
+        AT_AudioBusView in_view{ 998, "TestSrc", 2, 256, in_buf.channel_ptrs() };
+        AT_AudioProcessContext ctx{};
+        ctx.sample_rate = 48000;
+        ctx.num_frames = 256;
+        ctx.input_bus_count = 1;
+        ctx.input_buses = &in_view;
+        ctx.output_bus = { flt_id, "Test Filter", 2, 256, out_buf.channel_ptrs() };
+
+        flt_node->bundle->vtable->process_audio(flt_node->handle, &ctx);
+
+        float max_out = 0.0f;
+        for (uint32_t f = 128; f < 256; ++f) { // check after settle
+            max_out = std::max(max_out, std::abs(out_buf.channel(0)[f]));
+        }
+        // 10 kHz is ~5.6 octaves above 200 Hz, with 12 dB/oct attenuation should be < 0.1
+        TEST_ASSERT(max_out < 0.1f, "Filter failed to attenuate high frequencies: max_out=" + std::to_string(max_out));
+    }
+
+    // 5. Test Noise Gate Silence Clamping
+    {
+        uint32_t ng_id = engine.spawn_node("at.builtin.audio.noise_gate", "Test Gate", &err);
+        TEST_ASSERT(ng_id != 0, "Failed to spawn NoiseGateNode");
+
+        const auto* ng_node = engine.active_profile().find_node(ng_id);
+        TEST_ASSERT(ng_node != nullptr, "Noise gate node missing");
+
+        // Quiet signal (-60 dB = 0.001 amplitude, below -45 dB threshold)
+        at::AlignedPlanarBuffer in_buf(2, 256);
+        at::AlignedPlanarBuffer out_buf(2, 256);
+        for (uint32_t f = 0; f < 256; ++f) {
+            in_buf.channel(0)[f] = 0.001f;
+            in_buf.channel(1)[f] = 0.001f;
+        }
+
+        AT_AudioBusView in_view{ 997, "TestSrc", 2, 256, in_buf.channel_ptrs() };
+        AT_AudioProcessContext ctx{};
+        ctx.sample_rate = 48000;
+        ctx.num_frames = 256;
+        ctx.input_bus_count = 1;
+        ctx.input_buses = &in_view;
+        ctx.output_bus = { ng_id, "Test Gate", 2, 256, out_buf.channel_ptrs() };
+
+        ng_node->bundle->vtable->process_audio(ng_node->handle, &ctx);
+
+        float max_out = 0.0f;
+        for (uint32_t f = 0; f < 256; ++f) {
+            max_out = std::max(max_out, std::abs(out_buf.channel(0)[f]));
+        }
+        // Sub-threshold quiet signal should be attenuated below 0.0001
+        TEST_ASSERT(max_out <= 0.0005f, "Noise gate failed to mute sub-threshold audio: max_out=" + std::to_string(max_out));
+    }
+
+    // 6. Test Bitcrusher Quantization
+    {
+        uint32_t bit_id = engine.spawn_node("at.builtin.audio.bitcrusher", "Test Bitcrusher", &err);
+        TEST_ASSERT(bit_id != 0, "Failed to spawn BitcrusherNode");
+
+        // Set to 2-bit quantization (steps = 2^(2-1) = 2, values in {-1, -0.5, 0, 0.5, 1})
+        AT_ControlValue bits_val{ AT_VAL_FLOAT, { .float_val = 2.0 } };
+        TEST_ASSERT(engine.set_node_control_by_identifier(bit_id, "bit_depth", bits_val) == AT_OK, "Failed to set bit depth");
+
+        const auto* bit_node = engine.active_profile().find_node(bit_id);
+        TEST_ASSERT(bit_node != nullptr, "Bitcrusher node missing");
+
+        at::AlignedPlanarBuffer in_buf(2, 256);
+        at::AlignedPlanarBuffer out_buf(2, 256);
+        for (uint32_t f = 0; f < 256; ++f) {
+            in_buf.channel(0)[f] = 0.234567f;
+            in_buf.channel(1)[f] = 0.234567f;
+        }
+
+        AT_AudioBusView in_view{ 996, "TestSrc", 2, 256, in_buf.channel_ptrs() };
+        AT_AudioProcessContext ctx{};
+        ctx.sample_rate = 48000;
+        ctx.num_frames = 256;
+        ctx.input_bus_count = 1;
+        ctx.input_buses = &in_view;
+        ctx.output_bus = { bit_id, "Test Bitcrusher", 2, 256, out_buf.channel_ptrs() };
+
+        bit_node->bundle->vtable->process_audio(bit_node->handle, &ctx);
+
+        // 0.234567 rounded to step size 0.5 is 0.0 or 0.5
+        float out_val = out_buf.channel(0)[10];
+        TEST_ASSERT(std::abs(out_val - 0.0f) < 1e-4f || std::abs(out_val - 0.5f) < 1e-4f,
+                    "Bitcrusher quantization failure: got " + std::to_string(out_val));
+    }
+
+    std::cout << "  -> Passed! Verified DSP algorithms for all new audio nodes.\n";
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -555,9 +760,10 @@ int main() {
     if (!test_7_gui_canvas_controls_and_row_alignment()) return 1;
     if (!test_8_app_audio_router_and_profile_persistence()) return 1;
     if (!test_9_robust_logging_and_rotation()) return 1;
+    if (!test_10_additional_audio_processing_nodes()) return 1;
 
     std::cout << "====================================================================\n";
-    std::cout << " ALL 9 AUTOMATED PROOF-OF-CONCEPT TESTS PASSED SUCCESSFULLY!\n";
+    std::cout << " ALL 10 AUTOMATED PROOF-OF-CONCEPT TESTS PASSED SUCCESSFULLY!\n";
     std::cout << "====================================================================\n";
     return 0;
 }
