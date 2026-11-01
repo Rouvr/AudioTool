@@ -11,6 +11,11 @@
 
 namespace at {
 
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4324)
+#endif
+
 // Lock-free Single-Producer Single-Consumer (SPSC) Ring Buffer for interleaved or planar stereo frames
 class SpscAudioRingBuffer {
 public:
@@ -148,5 +153,9 @@ private:
     alignas(64) std::atomic<uint32_t> write_pos_{0};
     alignas(64) std::atomic<uint32_t> read_pos_{0};
 };
+
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 } // namespace at

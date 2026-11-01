@@ -9,6 +9,7 @@
 #endif
 #include <windows.h>
 
+#include <cwctype>
 #include <sstream>
 
 namespace at {
