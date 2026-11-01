@@ -134,7 +134,7 @@ LONG WINAPI CrashExceptionFilter(EXCEPTION_POINTERS* pEx) {
 } // namespace
 
 struct Logger::Impl {
-    std::mutex            mutex;
+    std::recursive_mutex  mutex;
     std::ofstream         dated_stream;
     std::ofstream         latest_stream;
     std::filesystem::path dated_path;
