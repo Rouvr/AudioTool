@@ -104,8 +104,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # 6. Optional Local Self-Signed Certificate Signing (if configured per docs/06)
-$LocalCert = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert -ErrorAction SilentlyContinue |
-    Where-Object { $_.Subject -like "*Rouvr AudioTool Local Build*" } |
+$LocalCert = Get-ChildItem Cert:\CurrentUser\My -ErrorAction SilentlyContinue |
+    Where-Object { $_.Subject -like "*Rouvr AudioTool Local Build*" -and $_.HasPrivateKey } |
     Select-Object -First 1
 
 if ($null -ne $LocalCert) {
