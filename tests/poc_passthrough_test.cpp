@@ -278,8 +278,8 @@ bool test_6_volume_node_mixing_and_normalization() {
     for (int t = 0; t < 5; ++t) {
         engine.device_manager().inject_virtual_input_frames("virtual://test_input", src.channel_ptrs(), 2, 256);
         engine.process_single_tick();
+        engine.device_manager().extract_virtual_output_frames("virtual://test_output", dst.channel_ptrs(), 2, 256);
     }
-    engine.device_manager().extract_virtual_output_frames("virtual://test_output", dst.channel_ptrs(), 2, 256);
 
     // Both in1 and in2 read 0.25f, and VolumeNode mixes both with unity gain -> output is ~0.50f
     float sample_l = dst.channel(0)[255];
@@ -292,8 +292,8 @@ bool test_6_volume_node_mixing_and_normalization() {
     for (int t = 0; t < 5; ++t) {
         engine.device_manager().inject_virtual_input_frames("virtual://test_input", src.channel_ptrs(), 2, 256);
         engine.process_single_tick();
+        engine.device_manager().extract_virtual_output_frames("virtual://test_output", dst.channel_ptrs(), 2, 256);
     }
-    engine.device_manager().extract_virtual_output_frames("virtual://test_output", dst.channel_ptrs(), 2, 256);
 
     float muted_sample = dst.channel(0)[255];
     TEST_ASSERT(std::abs(muted_sample) < 1e-4f, "Output should be silent after master mute, got: " + std::to_string(muted_sample));
