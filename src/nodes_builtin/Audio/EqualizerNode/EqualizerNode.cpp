@@ -29,6 +29,11 @@ const char* const kBandLabels[kNumBands] = {
     "1.0 kHz", "1.6 kHz", "2.5 kHz", "4.0 kHz", "6.3 kHz", "10.0 kHz", "16.0 kHz", "20.0 kHz"
 };
 
+const char* const kBandIdentifiers[kNumBands] = {
+    "band_0", "band_1", "band_2", "band_3", "band_4", "band_5", "band_6", "band_7",
+    "band_8", "band_9", "band_10", "band_11", "band_12", "band_13", "band_14", "band_15"
+};
+
 enum ControlIds : uint32_t {
     CTRL_BYPASS      = 100,
     CTRL_MASTER_GAIN = 101,
@@ -48,7 +53,6 @@ struct EqualizerState {
     at::SmoothedFloat smoothed_master_gain{1.0f};
 
     std::vector<AT_ControlDescriptor>  cached_controls;
-    std::vector<std::string>           string_storage;
 
     void update_filters() {
         float fs = static_cast<float>(sample_rate);
@@ -63,7 +67,6 @@ struct EqualizerState {
 
     void init_descriptors() {
         cached_controls.clear();
-        string_storage.clear();
 
         cached_controls.push_back({
             CTRL_BYPASS, "bypass", "Bypass", "",
@@ -82,10 +85,9 @@ struct EqualizerState {
         });
 
         for (size_t i = 0; i < kNumBands; ++i) {
-            string_storage.push_back(std::string("band_") + std::to_string(i));
             cached_controls.push_back({
                 static_cast<uint32_t>(CTRL_BAND_BASE + i),
-                string_storage.back().c_str(),
+                kBandIdentifiers[i],
                 kBandLabels[i],
                 "dB",
                 AT_CTRL_SLIDER,
