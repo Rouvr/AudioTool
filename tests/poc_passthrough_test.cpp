@@ -725,20 +725,6 @@ bool test_10_additional_audio_processing_nodes() {
         TEST_ASSERT(std::abs(out_val - 0.0f) < 1e-4f || std::abs(out_val - 0.5f) < 1e-4f,
                     "Bitcrusher quantization failure: got " + std::to_string(out_val));
     }
-        at::AlignedPlanarBuffer dst(2, 256);
-        for (uint32_t f = 0; f < 256; ++f) {
-            src.channel(0)[f] = 0.234567f;
-            src.channel(1)[f] = 0.234567f;
-        }
-
-        eng.device_manager().inject_virtual_input_frames("virtual://test_bit_in", src.channel_ptrs(), 2, 256);
-        eng.process_single_tick();
-        eng.device_manager().extract_virtual_output_frames("virtual://test_bit_out", dst.channel_ptrs(), 2, 256);
-
-        float out_val = dst.channel(0)[10];
-        TEST_ASSERT(std::abs(out_val - 0.0f) < 1e-4f || std::abs(out_val - 0.5f) < 1e-4f,
-                    "Bitcrusher quantization failure: got " + std::to_string(out_val));
-    }
 
     std::cout << "  -> Passed! Verified DSP algorithms for all new audio nodes.\n";
     return true;
