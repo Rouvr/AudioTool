@@ -10,7 +10,10 @@
 
 #include "at_version.h"
 #include "common/AppPathsAndRegistry.h"
+#include "engine/AudioEngine.h"
 #include "engine/AudioGraphEngine.h"
+#include "gui/CanvasRenderer.h"
+#include "imgui.h"
 
 #include <cmath>
 #include <cstring>
@@ -304,6 +307,86 @@ bool test_6_volume_node_mixing_and_normalization() {
     return true;
 }
 
+bool test_7_gui_canvas_controls_and_row_alignment() {
+    std::cout << "[TEST 7] Verifying GUI CanvasRenderer Node Controls Clickability & Horizontal Row Alignment...\n";
+
+    at::EngineConfig cfg{ 48000, 256, 4 };
+    at::AudioEngine engine;
+    std::string err;
+    TEST_ASSERT(engine.initialize(cfg, &err), "AudioEngine initialize failed: " + err);
+
+    at::ProfileGraph* prof = engine.create_profile("GUI Test Profile");
+    TEST_ASSERT(prof != nullptr, "Failed to create profile");
+
+    // Place VirtualInputNode at world (180, 100), expanded (Form 2)
+    uint32_t vin = prof->spawn_node("at.builtin.audio.virtual_input", "Mic Node", &err);
+    TEST_ASSERT(vin != 0, "Failed to spawn VirtualInputNode: " + err);
+    prof->set_node_ui(vin, { 180.0f, 100.0f, true });
+
+    // Setup headless Dear ImGui context
+    IMGUI_CHECKVERSION();
+    ImGuiContext* ctx = ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.DisplaySize = ImVec2(1280.0f, 800.0f);
+    unsigned char* tex_pixels = nullptr;
+    int tex_w = 0, tex_h = 0;
+    io.Fonts->GetTexDataAsRGBA32(&tex_pixels, &tex_w, &tex_h);
+
+    at::CanvasRenderer renderer;
+
+    auto step_gui = [&](ImVec2 mouse_pos, bool mouse_down) {
+        io.DeltaTime = 1.0f / 60.0f;
+        io.MousePos = mouse_pos;
+        io.MouseDown[0] = mouse_down;
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+        ImGui::SetNextWindowSize(ImVec2(1280.0f, 800.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+        ImGui::Begin("HeadlessHost", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
+        ImGui::PopStyleVar();
+        renderer.render(*prof, engine, 0.0f);
+        ImGui::End();
+        ImGui::Render();
+    };
+
+    // Warm-up frame
+    step_gui(ImVec2(10.0f, 10.0f), false);
+
+    // Verify initial Mute (Row 2, 3rd control row) is false
+    at::OwnedValue mute_val;
+    TEST_ASSERT(prof->get_control(vin, "mute", &mute_val) == AT_OK, "Failed to query mute");
+    TEST_ASSERT(mute_val.bool_val == false, "Initial mute must be false");
+
+    // Row 2 (Mute button) sits at:
+    //   x = [180 + 10 + label_col_w + 8 .. 180 + width - 6] -> x = 360.0f is inside the node's Right Cell
+    //   y = 100 (node_y) + 32 (header_h) + 2 * 30 (row 2) + 15 (half row) = 207.0f
+    // If Row 2 had snapped to the left of the window (x = 0) or if CanvasHitBox blocked clicks, clicking (360, 207) would fail!
+    ImVec2 mute_btn_pos(360.0f, 207.0f);
+    step_gui(mute_btn_pos, false);
+    step_gui(mute_btn_pos, true);
+    step_gui(mute_btn_pos, false);
+
+    TEST_ASSERT(prof->get_control(vin, "mute", &mute_val) == AT_OK, "Failed to query mute after click");
+    TEST_ASSERT(mute_val.bool_val == true, "Clicking Mute button on Row 2 inside node must toggle mute to true!");
+
+    // Row 1 (Input Gain Slider, 2nd control row) sits at y = 100 + 32 + 1 * 30 + 15 = 177.0f
+    // Click near the right side of the slider (x = 430.0f, y = 177.0f) to change gain from 0.0 dB
+    ImVec2 slider_pos(430.0f, 177.0f);
+    step_gui(slider_pos, false);
+    step_gui(slider_pos, true);
+    step_gui(slider_pos, false);
+
+    at::OwnedValue gain_val;
+    TEST_ASSERT(prof->get_control(vin, "input_gain_db", &gain_val) == AT_OK, "Failed to query input_gain_db");
+    TEST_ASSERT(std::abs(gain_val.float_val) > 1.0, "Clicking Input Gain slider on Row 1 inside node must update gain_db, got: " + std::to_string(gain_val.float_val));
+
+    ImGui::DestroyContext(ctx);
+    engine.shutdown();
+
+    std::cout << "  -> Passed! GUI node controls on all rows are horizontally aligned to the node and respond to clicks/drags.\n";
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -320,9 +403,10 @@ int main() {
     if (!test_4_control_plane_and_function_binding()) return 1;
     if (!test_5_runtime_reload_and_wasapi_enumeration()) return 1;
     if (!test_6_volume_node_mixing_and_normalization()) return 1;
+    if (!test_7_gui_canvas_controls_and_row_alignment()) return 1;
 
     std::cout << "====================================================================\n";
-    std::cout << " ALL 6 AUTOMATED PROOF-OF-CONCEPT TESTS PASSED SUCCESSFULLY!\n";
+    std::cout << " ALL 7 AUTOMATED PROOF-OF-CONCEPT TESTS PASSED SUCCESSFULLY!\n";
     std::cout << "====================================================================\n";
     return 0;
 }

@@ -146,8 +146,9 @@ enable_testing()
 
 add_executable(at_poc_tests
     tests/poc_passthrough_test.cpp
+    src/gui/CanvasRenderer.cpp
 )
-target_link_libraries(at_poc_tests PRIVATE at_engine)
+target_link_libraries(at_poc_tests PRIVATE at_engine imgui)
 add_dependencies(at_poc_tests VirtualInputNode VolumeNode OutputNode TimerNode)
 
 add_test(NAME AudioTool_PoC_Tests COMMAND at_poc_tests)
