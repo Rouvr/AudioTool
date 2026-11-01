@@ -327,6 +327,7 @@ bool test_7_gui_canvas_controls_and_row_alignment() {
     IMGUI_CHECKVERSION();
     ImGuiContext* ctx = ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
+    io.IniFilename = nullptr;
     io.DisplaySize = ImVec2(1280.0f, 800.0f);
     unsigned char* tex_pixels = nullptr;
     int tex_w = 0, tex_h = 0;

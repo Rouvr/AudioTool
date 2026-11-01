@@ -119,6 +119,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    static std::string ini_path = (at::AppPathsAndRegistry::get_local_data_root() / "imgui.ini").string();
+    io.IniFilename = ini_path.c_str();
 
     ImGui::StyleColorsDark();
     ImGuiStyle& style = ImGui::GetStyle();
