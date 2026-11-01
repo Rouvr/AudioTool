@@ -1,9 +1,16 @@
 param(
-    [string]$BuildType = "Release",
+    [string]$BuildType = "Development",
     [string]$CommitMessage = "",
     [switch]$SkipCommit = $false,
     [switch]$SkipTests = $false
 )
+
+if ([string]::IsNullOrWhiteSpace($CommitMessage)) {
+    # Make commit message mandatory if SkipCommit is not set
+    if (-not $SkipCommit) {
+        throw "CommitMessage parameter is required unless SkipCommit is specified."
+    }
+}
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot

@@ -203,3 +203,4 @@ In [CanvasRenderer.cpp](file:///d:/Code/AudioTool/src/gui/CanvasRenderer.cpp):
     - `Sources` -> Virtual Audio Input
   - `Control`
     - `Triggers` -> Periodic Pulse Timer
+

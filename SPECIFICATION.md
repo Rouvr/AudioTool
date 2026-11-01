@@ -41,7 +41,7 @@ This specification is organized into nine detailed engineering documents located
    - User-configurable file hierarchy under `%LOCALAPPDATA%\Rouvr\AudioTool` (`profiles/`, `plugins/`, `cache/`, `config.json`).
    - Windows Registry specification under `HKEY_CURRENT_USER\Software\Rouvr\AudioTool` (`InstallPath`, `LocalDataPath`, `Version`, `BuildId`).
    - How to run unsigned local builds safely on Windows without weakening security for downloaded applications (DLL search order hardening, Mark-of-the-Web isolation, and optional Local-Only Self-Signed Code Signing).
-   - Standardized CMake + `Makefile` / `build.ps1` pipeline that reads manual version from `VERSION.txt`, generates a unique `AT_BUILD_ID` in `include/at_version.h`, commits changes to Git, builds the project, deploys plugins, and runs automated tests.
+   - Standardized CMake + `Makefile` / `build.ps1` pipeline that reads manual version from `VERSION.txt`, generates a unique `AT_BUILD_ID` in `include/at_version.h`, commits changes to Git, builds the project, deploys plugins, and runs automated tests. Always specify a valid commit message of what has been changed
 7. **[07 — VolumeNode, Virtual Audio Cable & GUI Implementation Notes](file:///d:/Code/AudioTool/docs/07_VolumeNode_VirtualAudioCable_and_GUI_Implementation.md)**
    - Verification of mixing browser/game and microphone outputs via VB-Audio Virtual Cable.
    - Complete implementation of `VolumeNode` with multi-channel decibel/linear gain, mute toggle, and SIMD processing.
