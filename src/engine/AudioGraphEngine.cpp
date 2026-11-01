@@ -521,15 +521,28 @@ bool AudioGraphEngine::rebuild_topological_order(std::string* out_error) {
     sorted_audio_nodes_ = std::move(sorted_audio);
 
     control_nodes_.clear();
+    std::vector<const char*> source_names;
     for (auto& kv : nodes_) {
-        if (kv.second->bundle->descriptor->plane_type == AT_NODE_PLANE_CONTROL) {
-            control_nodes_.push_back(kv.second.get());
+        GraphNodeInstance* n = kv.second.get();
+        if (n->bundle->descriptor->plane_type == AT_NODE_PLANE_CONTROL) {
+            control_nodes_.push_back(n);
         }
-        if (kv.second->bundle->vtable->on_connections_changed) {
-            kv.second->bundle->vtable->on_connections_changed(
-                kv.second->handle,
-                static_cast<uint32_t>(kv.second->upstream_node_ids.size()),
-                static_cast<uint32_t>(kv.second->downstream_node_ids.size()));
+        if (n->bundle->vtable->on_connections_changed) {
+            n->bundle->vtable->on_connections_changed(
+                n->handle,
+                static_cast<uint32_t>(n->upstream_node_ids.size()),
+                static_cast<uint32_t>(n->downstream_node_ids.size()));
+        }
+        if (n->bundle->vtable->on_input_sources_changed) {
+            source_names.clear();
+            for (uint32_t up : n->upstream_node_ids) {
+                source_names.push_back(nodes_[up]->display_name.c_str());
+            }
+            n->bundle->vtable->on_input_sources_changed(
+                n->handle,
+                static_cast<uint32_t>(n->upstream_node_ids.size()),
+                n->upstream_node_ids.empty() ? nullptr : n->upstream_node_ids.data(),
+                source_names.empty() ? nullptr : source_names.data());
         }
     }
 
