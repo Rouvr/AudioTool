@@ -6,6 +6,7 @@
 #include "at_sdk/at_abi.h"
 #include "at_sdk/at_simd_buffer.h"
 #include "engine/DeviceManager.h"
+#include "engine/EngineTypes.h"
 #include "engine/PluginManager.h"
 
 #include <atomic>
@@ -18,41 +19,35 @@
 
 namespace at {
 
-struct EngineConfig {
-    uint32_t sample_rate              = 48000;
-    uint32_t buffer_size_frames       = 256;
-    uint32_t max_connections_per_port = 4;
-};
-
-struct AudioEdge {
-    uint32_t edge_id     = 0;
-    uint32_t src_node_id = 0;
-    uint32_t dst_node_id = 0;
-};
-
-struct ControlEdge {
-    uint32_t        edge_id            = 0;
-    uint32_t        src_node_id        = 0;
-    uint32_t        src_output_port    = 0;
-    uint32_t        dst_node_id        = 0;
-    uint32_t        target_function_id = 0;
-    AT_ControlValue bound_arg          = {};
-    std::string     bound_string_storage;
-};
-
-struct GraphNodeInstance {
-    uint32_t                     node_id = 0;
-    std::string                  plugin_id;
-    std::string                  display_name;
-    const AT_PluginExportBundle* bundle  = nullptr;
-    AT_NodeHandle                handle  = nullptr;
-    AlignedPlanarBuffer          output_bus{2, 256};
-    std::vector<uint32_t>        upstream_node_ids;
-    std::vector<uint32_t>        downstream_node_ids;
-};
-
 class AudioGraphEngine {
 public:
+    struct AudioEdge {
+        uint32_t edge_id     = 0;
+        uint32_t src_node_id = 0;
+        uint32_t dst_node_id = 0;
+    };
+
+    struct ControlEdge {
+        uint32_t        edge_id            = 0;
+        uint32_t        src_node_id        = 0;
+        uint32_t        src_output_port    = 0;
+        uint32_t        dst_node_id        = 0;
+        uint32_t        target_function_id = 0;
+        AT_ControlValue bound_arg          = {};
+        std::string     bound_string_storage;
+    };
+
+    struct GraphNodeInstance {
+        uint32_t                     node_id = 0;
+        std::string                  plugin_id;
+        std::string                  display_name;
+        const AT_PluginExportBundle* bundle  = nullptr;
+        AT_NodeHandle                handle  = nullptr;
+        AlignedPlanarBuffer          output_bus{2, 256};
+        std::vector<uint32_t>        upstream_node_ids;
+        std::vector<uint32_t>        downstream_node_ids;
+    };
+
     AudioGraphEngine();
     ~AudioGraphEngine();
 
