@@ -39,6 +39,24 @@ static const IID IID_AudioPolicyConfig_Win10 = {
     0x2a59116d, 0x6c4f, 0x45e0, { 0xa7, 0x4f, 0x70, 0x7e, 0x3f, 0xef, 0x92, 0x58 }
 };
 
+std::string utf8_encode(const std::wstring& wstr) {
+    if (wstr.empty()) return {};
+    int needed = WideCharToMultiByte(CP_UTF8, 0, wstr.data(), static_cast<int>(wstr.size()), nullptr, 0, nullptr, nullptr);
+    if (needed <= 0) return {};
+    std::string result(static_cast<size_t>(needed), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wstr.data(), static_cast<int>(wstr.size()), result.data(), needed, nullptr, nullptr);
+    return result;
+}
+
+std::wstring utf8_decode(const std::string& str) {
+    if (str.empty()) return {};
+    int needed = MultiByteToWideChar(CP_UTF8, 0, str.data(), static_cast<int>(str.size()), nullptr, 0);
+    if (needed <= 0) return {};
+    std::wstring result(static_cast<size_t>(needed), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, str.data(), static_cast<int>(str.size()), result.data(), needed);
+    return result;
+}
+
 // Formats an endpoint ID into the fully-qualified SWD#MMDEVAPI path required by AudioPolicyConfig:
 // \\?\SWD#MMDEVAPI#{endpoint_id}#{e6327cad-dcec-4949-ae8a-991e976a79d2}
 std::wstring make_full_device_id(const std::wstring& endpoint_id, EDataFlow flow) {
@@ -70,19 +88,6 @@ std::string extract_endpoint_id_from_full(const std::wstring& full_id) {
     }
     return (end > start) ? utf8_encode(full_id.substr(start, end - start)) : "";
 }
-
-std::string utf8_encode(const std::wstring& wstr) {
-    if (wstr.empty()) return {};
-    int needed = WideCharToMultiByte(CP_UTF8, 0, wstr.data(), static_cast<int>(wstr.size()), nullptr, 0, nullptr, nullptr);
-    if (needed <= 0) return {};
-    std::string result(static_cast<size_t>(needed), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, wstr.data(), static_cast<int>(wstr.size()), result.data(), needed, nullptr, nullptr);
-    return result;
-}
-
-std::wstring utf8_decode(const std::string& str) {
-    if (str.empty()) return {};
-    int needed = MultiByteToWideChar(CP_UTF8, 0, str.data(), static_cast<int>(str.size()), nullptr, 0);
     if (needed <= 0) return {};
     std::wstring result(static_cast<size_t>(needed), L'\0');
     MultiByteToWideChar(CP_UTF8, 0, str.data(), static_cast<int>(str.size()), result.data(), needed);
