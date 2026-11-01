@@ -33,13 +33,17 @@ To programmatically redirect an active process's audio stream without touching p
 - **Interface IDs (IID):**
   - Modern Windows 10 & Windows 11 (Build 21390+ / 21H2+): `{ab3d4648-e242-459f-b02f-541c70306324}`
   - Downlevel Windows 10: `{2a59116d-6c4f-45e0-a74f-707e3fef9258}`
-- **Redirection Call:**
-  ```cpp
-  policy->SetPersistedDefaultAudioEndpoint(pid, eRender, eConsole, deviceId);
-  policy->SetPersistedDefaultAudioEndpoint(pid, eRender, eMultimedia, deviceId);
-  ```
-  - Passing `nullptr` or `L""` clears the override and resets the application to system default.
-  - Multi-process applications (such as Chromium and Firefox content/utility processes) are handled by enumerating all sibling PIDs sharing the executable image name via `CreateToolhelp32Snapshot` and redirecting them in tandem.
+- **Virtual Method Table (VTable) Dispatches:**
+  Because `Windows.Media.Internal.AudioPolicyConfig` is an internal WinRT factory rather than a standard `IInspectable` interface, its custom methods start at specific VTable indices:
+  - **Slot 25:** `SetPersistedDefaultAudioEndpoint(uint32_t pid, uint32_t flow, uint32_t role, HSTRING hsDevice)`
+  - **Slot 26:** `GetPersistedDefaultAudioEndpoint(uint32_t pid, uint32_t flow, uint32_t role, HSTRING* outDevice)`
+  - **Slot 27:** `ClearAllPersistedApplicationDefaultEndpoints()`
+- **Device ID Formatting Requirement:**
+  `SetPersistedDefaultAudioEndpoint` strictly requires an `HSTRING` formatted as a fully-qualified `SWD\MMDEVAPI` software device path:
+  `\\?\SWD#MMDEVAPI#{endpoint_id}#{e6327cad-dcec-4949-ae8a-991e976a79d2}` (for render endpoints), or an empty string `L""` to reset the override back to system default.
+  Passing raw `LPCWSTR` or invoking mismatched VTable slots (such as slot 6) results in `combase.dll` treating the PID as an interface pointer and crashing with `EXCEPTION_ACCESS_VIOLATION (0xC0000005)`.
+- **Multi-Process Sibling Propagation:**
+  Multi-process applications (such as Chromium and Firefox content/utility processes) are handled by enumerating all sibling PIDs sharing the executable image name via `CreateToolhelp32Snapshot` and redirecting them in tandem.
 
 ---
 
