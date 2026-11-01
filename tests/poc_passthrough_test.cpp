@@ -237,6 +237,71 @@ bool test_5_runtime_reload_and_wasapi_enumeration() {
     return true;
 }
 
+bool test_6_volume_node_mixing_and_normalization() {
+    std::cout << "[TEST 6] Verifying VolumeNode Dynamic Inputs, Channel Mixing & Gain Control...\n";
+
+    at::EngineConfig cfg{ 48000, 256, 4 };
+    at::AudioGraphEngine engine;
+    std::string err;
+    TEST_ASSERT(engine.initialize(cfg, &err), "Engine initialize failed: " + err);
+
+    // Spawn Input1, Input2, VolumeNode, OutputNode
+    const uint32_t in1 = engine.spawn_node("at.builtin.audio.virtual_input", "Source 1", &err);
+    const uint32_t in2 = engine.spawn_node("at.builtin.audio.virtual_input", "Source 2", &err);
+    const uint32_t vol = engine.spawn_node("at.builtin.audio.volume", "Mixer", &err);
+    const uint32_t out = engine.spawn_node("at.builtin.audio.output", "Output", &err);
+    TEST_ASSERT(in1 && in2 && vol && out, "Failed to spawn nodes");
+
+    // Bind to virtual endpoints
+    AT_ControlValue dev1{ AT_VAL_STRING, { .string_val = "virtual://test_input" } };
+    AT_ControlValue dev2{ AT_VAL_STRING, { .string_val = "virtual://test_input" } };
+    AT_ControlValue dev_out{ AT_VAL_STRING, { .string_val = "virtual://test_output" } };
+    engine.set_node_control_by_identifier(in1, "device_id", dev1);
+    engine.set_node_control_by_identifier(in2, "device_id", dev2);
+    engine.set_node_control_by_identifier(out, "device_id", dev_out);
+
+    // Connect: in1 -> vol, in2 -> vol, vol -> out
+    TEST_ASSERT(engine.connect_audio(in1, vol, &err) != 0, "Failed to connect in1 -> vol: " + err);
+    TEST_ASSERT(engine.connect_audio(in2, vol, &err) != 0, "Failed to connect in2 -> vol: " + err);
+    TEST_ASSERT(engine.connect_audio(vol, out, &err) != 0, "Failed to connect vol -> out: " + err);
+
+    // Inject 0.25f into virtual input
+    at::AlignedPlanarBuffer src(2, 256);
+    at::AlignedPlanarBuffer dst(2, 256);
+    for (uint32_t f = 0; f < 256; ++f) {
+        src.channel(0)[f] = 0.25f;
+        src.channel(1)[f] = 0.25f;
+    }
+    engine.device_manager().inject_virtual_input_frames("virtual://test_input", src.channel_ptrs(), 2, 256);
+
+    // Advance 5 ticks so SmoothedFloat ramp settles completely
+    for (int t = 0; t < 5; ++t) {
+        engine.device_manager().inject_virtual_input_frames("virtual://test_input", src.channel_ptrs(), 2, 256);
+        engine.process_single_tick();
+    }
+    engine.device_manager().extract_virtual_output_frames("virtual://test_output", dst.channel_ptrs(), 2, 256);
+
+    // Both in1 and in2 read 0.25f, and VolumeNode mixes both with unity gain -> output is ~0.50f
+    float sample_l = dst.channel(0)[255];
+    TEST_ASSERT(std::abs(sample_l - 0.50f) < 0.05f, "Expected summed mixed sample ~0.50f, got: " + std::to_string(sample_l));
+
+    // Test Master Mute function
+    AT_ControlValue none_arg{ AT_VAL_NONE, { .int_val = 0 } };
+    TEST_ASSERT(engine.invoke_node_function_by_identifier(vol, "toggle_master_mute", none_arg) == AT_OK, "Failed to invoke toggle_master_mute");
+
+    for (int t = 0; t < 5; ++t) {
+        engine.device_manager().inject_virtual_input_frames("virtual://test_input", src.channel_ptrs(), 2, 256);
+        engine.process_single_tick();
+    }
+    engine.device_manager().extract_virtual_output_frames("virtual://test_output", dst.channel_ptrs(), 2, 256);
+
+    float muted_sample = dst.channel(0)[255];
+    TEST_ASSERT(std::abs(muted_sample) < 1e-4f, "Output should be silent after master mute, got: " + std::to_string(muted_sample));
+
+    std::cout << "  -> Passed! VolumeNode successfully summed multiple inputs, smoothed gains, and responded to Master Mute function.\n";
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -252,6 +317,7 @@ int main() {
     if (!test_3_audio_passthrough_accuracy()) return 1;
     if (!test_4_control_plane_and_function_binding()) return 1;
     if (!test_5_runtime_reload_and_wasapi_enumeration()) return 1;
+    if (!test_6_volume_node_mixing_and_normalization()) return 1;
 
     std::cout << "====================================================================\n";
     std::cout << " ALL 5 AUTOMATED PROOF-OF-CONCEPT TESTS PASSED SUCCESSFULLY!\n";
