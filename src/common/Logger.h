@@ -73,3 +73,4 @@ private:
 #define AT_LOG_WARN(subsystem, ...)  ::at::Logger::instance().log_format(::at::LogLevel::Warn,  subsystem, __FILE__, __LINE__, __VA_ARGS__)
 #define AT_LOG_ERROR(subsystem, ...) ::at::Logger::instance().log_format(::at::LogLevel::Error, subsystem, __FILE__, __LINE__, __VA_ARGS__)
 #define AT_LOG_FATAL(subsystem, ...) ::at::Logger::instance().log_format(::at::LogLevel::Fatal, subsystem, __FILE__, __LINE__, __VA_ARGS__)
+

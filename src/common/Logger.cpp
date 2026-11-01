@@ -11,6 +11,7 @@
 #endif
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <dbghelp.h>
 #include <cstdarg>
 #include <chrono>
 #include <ctime>
@@ -117,13 +118,103 @@ LONG WINAPI CrashExceptionFilter(EXCEPTION_POINTERS* pEx) {
 
     if (pEx->ContextRecord) {
 #if defined(_M_X64) || defined(__x86_64__)
-        char reg_buf[512];
-        std::snprintf(reg_buf, sizeof(reg_buf),
-                      "Registers: RIP=0x%llX RSP=0x%llX RAX=0x%llX RBX=0x%llX RCX=0x%llX RDX=0x%llX",
+        char reg_buf1[512];
+        std::snprintf(reg_buf1, sizeof(reg_buf1),
+                      "Registers: RIP=0x%016llX RSP=0x%016llX RBP=0x%016llX EFL=0x%08lX",
                       pEx->ContextRecord->Rip, pEx->ContextRecord->Rsp,
+                      pEx->ContextRecord->Rbp, pEx->ContextRecord->EFlags);
+        Logger::instance().log(LogLevel::Fatal, "CRASH", "ExceptionFilter", 0, reg_buf1);
+
+        char reg_buf2[512];
+        std::snprintf(reg_buf2, sizeof(reg_buf2),
+                      "           RAX=0x%016llX RBX=0x%016llX RCX=0x%016llX RDX=0x%016llX",
                       pEx->ContextRecord->Rax, pEx->ContextRecord->Rbx,
                       pEx->ContextRecord->Rcx, pEx->ContextRecord->Rdx);
-        Logger::instance().log(LogLevel::Fatal, "CRASH", "ExceptionFilter", 0, reg_buf);
+        Logger::instance().log(LogLevel::Fatal, "CRASH", "ExceptionFilter", 0, reg_buf2);
+
+        char reg_buf3[512];
+        std::snprintf(reg_buf3, sizeof(reg_buf3),
+                      "           RSI=0x%016llX RDI=0x%016llX R8 =0x%016llX R9 =0x%016llX",
+                      pEx->ContextRecord->Rsi, pEx->ContextRecord->Rdi,
+                      pEx->ContextRecord->R8,  pEx->ContextRecord->R9);
+        Logger::instance().log(LogLevel::Fatal, "CRASH", "ExceptionFilter", 0, reg_buf3);
+
+        char reg_buf4[512];
+        std::snprintf(reg_buf4, sizeof(reg_buf4),
+                      "           R10=0x%016llX R11=0x%016llX R12=0x%016llX R13=0x%016llX R14=0x%016llX R15=0x%016llX",
+                      pEx->ContextRecord->R10, pEx->ContextRecord->R11,
+                      pEx->ContextRecord->R12, pEx->ContextRecord->R13,
+                      pEx->ContextRecord->R14, pEx->ContextRecord->R15);
+        Logger::instance().log(LogLevel::Fatal, "CRASH", "ExceptionFilter", 0, reg_buf4);
+
+        // --- Stack Walk and Symbol Resolution ---
+        HANDLE hProcess = GetCurrentProcess();
+        HANDLE hThread = GetCurrentThread();
+
+        SymSetOptions(SYMOPT_DEFERRED_LOADS | SYMOPT_UNDNAME | SYMOPT_LOAD_LINES);
+        SymInitialize(hProcess, nullptr, TRUE);
+
+        CONTEXT ctx = *pEx->ContextRecord;
+        STACKFRAME64 frame = {};
+        frame.AddrPC.Offset = ctx.Rip;
+        frame.AddrPC.Mode = AddrModeFlat;
+        frame.AddrFrame.Offset = ctx.Rbp;
+        frame.AddrFrame.Mode = AddrModeFlat;
+        frame.AddrStack.Offset = ctx.Rsp;
+        frame.AddrStack.Mode = AddrModeFlat;
+
+        Logger::instance().log(LogLevel::Fatal, "CRASH", "ExceptionFilter", 0, "=== Call Stack Backtrace ===");
+
+        int frame_num = 0;
+        char sym_buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(TCHAR)];
+        PSYMBOL_INFO pSymbol = reinterpret_cast<PSYMBOL_INFO>(sym_buffer);
+        pSymbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+        pSymbol->MaxNameLen = MAX_SYM_NAME;
+
+        while (frame_num < 32 && StackWalk64(IMAGE_FILE_MACHINE_AMD64, hProcess, hThread, &frame, &ctx,
+                                             nullptr, SymFunctionTableAccess64, SymGetModuleBase64, nullptr)) {
+            if (frame.AddrPC.Offset == 0) break;
+
+            char frame_line[1024];
+            char mod_name[MAX_PATH] = "Unknown";
+            HMODULE hFrameMod = nullptr;
+            if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                   reinterpret_cast<LPCSTR>(frame.AddrPC.Offset), &hFrameMod) && hFrameMod) {
+                char full_mod[MAX_PATH] = {};
+                GetModuleFileNameA(hFrameMod, full_mod, MAX_PATH);
+                std::snprintf(mod_name, sizeof(mod_name), "%s", basename_only(full_mod));
+            }
+            uint64_t mod_base = SymGetModuleBase64(hProcess, frame.AddrPC.Offset);
+            uint64_t rel_offset = mod_base ? (frame.AddrPC.Offset - mod_base) : frame.AddrPC.Offset;
+
+            DWORD64 displacement = 0;
+            BOOL has_sym = SymFromAddr(hProcess, frame.AddrPC.Offset, &displacement, pSymbol);
+
+            IMAGEHLP_LINE64 line_info = {};
+            line_info.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
+            DWORD line_disp = 0;
+            BOOL has_line = SymGetLineFromAddr64(hProcess, frame.AddrPC.Offset, &line_disp, &line_info);
+
+            if (has_sym && has_line) {
+                std::snprintf(frame_line, sizeof(frame_line),
+                              "  [%2d] 0x%016llX %s!%s (+0x%llX) [%s:%lu]",
+                              frame_num, frame.AddrPC.Offset, mod_name, pSymbol->Name, displacement,
+                              basename_only(line_info.FileName), line_info.LineNumber);
+            } else if (has_sym) {
+                std::snprintf(frame_line, sizeof(frame_line),
+                              "  [%2d] 0x%016llX %s!%s (+0x%llX)",
+                              frame_num, frame.AddrPC.Offset, mod_name, pSymbol->Name, displacement);
+            } else {
+                std::snprintf(frame_line, sizeof(frame_line),
+                              "  [%2d] 0x%016llX %s+0x%llX",
+                              frame_num, frame.AddrPC.Offset, mod_name, rel_offset);
+            }
+
+            Logger::instance().log(LogLevel::Fatal, "CRASH", "ExceptionFilter", 0, frame_line);
+            frame_num++;
+        }
+
+        SymCleanup(hProcess);
 #endif
     }
 

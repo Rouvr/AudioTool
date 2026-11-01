@@ -157,3 +157,4 @@ When diagnosing an issue reported by a user:
      - `[PLUGIN    ]`: Check if a plugin was blocked due to untrusted download (`Zone.Identifier`) or ABI mismatch.
      - `[WINAPI    ]`: Check registry permissions or thread priority elevation failures.
      - `[WASAPI    ]`: Check for device detachment (`AUDCLNT_E_DEVICE_INVALIDATED`) or format incompatibility.
+

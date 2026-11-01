@@ -39,12 +39,37 @@ static const IID IID_AudioPolicyConfig_Win10 = {
     0x2a59116d, 0x6c4f, 0x45e0, { 0xa7, 0x4f, 0x70, 0x7e, 0x3f, 0xef, 0x92, 0x58 }
 };
 
-// Interface definition matching Windows.Media.Internal.AudioPolicyConfig
-struct IAudioPolicyConfigFactory_Internal : public IInspectable {
-    virtual HRESULT STDMETHODCALLTYPE SetPersistedDefaultAudioEndpoint(uint32_t processId, EDataFlow flow, ERole role, LPCWSTR deviceId) = 0;
-    virtual HRESULT STDMETHODCALLTYPE GetPersistedDefaultAudioEndpoint(uint32_t processId, EDataFlow flow, ERole role, HSTRING* deviceId) = 0;
-    virtual HRESULT STDMETHODCALLTYPE ClearAllPersistedApplicationDefaultEndpoints() = 0;
-};
+// Formats an endpoint ID into the fully-qualified SWD#MMDEVAPI path required by AudioPolicyConfig:
+// \\?\SWD#MMDEVAPI#{endpoint_id}#{e6327cad-dcec-4949-ae8a-991e976a79d2}
+std::wstring make_full_device_id(const std::wstring& endpoint_id, EDataFlow flow) {
+    if (endpoint_id.empty() || endpoint_id == L"(default)" || endpoint_id == L"default") {
+        return L"";
+    }
+    const wchar_t* prefix = L"\\\\?\\SWD#MMDEVAPI#";
+    const wchar_t* postfix = (flow == eRender)
+        ? L"#{e6327cad-dcec-4949-ae8a-991e976a79d2}"
+        : L"#{e2ef81be-33fa-4800-9670-1cd474972c3f}";
+    return std::wstring(prefix) + endpoint_id + postfix;
+}
+
+// Extracts the core MMDevice ID ({0.0.0.00000000}.{GUID}) from a full SWD path if needed:
+std::string extract_endpoint_id_from_full(const std::wstring& full_id) {
+    if (full_id.empty()) return "";
+    size_t start = full_id.find(L"{0.0.");
+    if (start == std::wstring::npos) {
+        // Fallback: search for first opening brace
+        start = full_id.find(L'{');
+        if (start == std::wstring::npos) return "";
+    }
+    size_t end = full_id.find(L"}#", start);
+    if (end == std::wstring::npos) {
+        end = full_id.rfind(L'}');
+        if (end != std::wstring::npos) end += 1;
+    } else {
+        end += 1;
+    }
+    return (end > start) ? std::string(full_id.begin() + start, full_id.begin() + end) : "";
+}
 
 std::string utf8_encode(const std::wstring& wstr) {
     if (wstr.empty()) return {};
@@ -174,20 +199,45 @@ bool AppAudioRouter::set_persisted_endpoint(uint32_t pid, const std::wstring& en
         AT_LOG_WARN("COM/POLICY", "Cannot set persisted endpoint: factory not initialized");
         return false;
     }
-    auto* policy = static_cast<IAudioPolicyConfigFactory_Internal*>(audio_policy_factory_);
-    if (!policy) {
+    if (!audio_policy_factory_) {
         AT_LOG_ERROR("COM/POLICY", "audio_policy_factory_ is null during endpoint dispatch");
         return false;
     }
 
-    LPCWSTR dev_ptr = endpoint_id_w.empty() ? nullptr : endpoint_id_w.c_str();
+    HMODULE hComBase = GetModuleHandleW(L"combase.dll");
+    if (!hComBase) hComBase = LoadLibraryW(L"combase.dll");
+    typedef HRESULT (WINAPI *pfnWindowsCreateString)(PCNZWCH, UINT32, HSTRING*);
+    typedef HRESULT (WINAPI *pfnWindowsDeleteString)(HSTRING);
+    auto pWindowsCreateString = reinterpret_cast<pfnWindowsCreateString>(GetProcAddress(hComBase, "WindowsCreateString"));
+    auto pWindowsDeleteString = reinterpret_cast<pfnWindowsDeleteString>(GetProcAddress(hComBase, "WindowsDeleteString"));
 
-    AT_LOG_DEBUG("COM/POLICY", "Calling SetPersistedDefaultAudioEndpoint(PID=%u, device='%s')",
-                 pid, dev_ptr ? utf8_encode(dev_ptr).c_str() : "[System Default]");
+    if (!pWindowsCreateString || !pWindowsDeleteString) {
+        AT_LOG_ERROR("COM/POLICY", "Failed to resolve WinRT string functions in combase.dll");
+        return false;
+    }
 
-    // Route for both eConsole and eMultimedia roles so games, browsers, and media players are routed immediately
-    HRESULT hr1 = policy->SetPersistedDefaultAudioEndpoint(pid, eRender, eConsole, dev_ptr);
-    HRESULT hr2 = policy->SetPersistedDefaultAudioEndpoint(pid, eRender, eMultimedia, dev_ptr);
+    std::wstring full_dev_id = make_full_device_id(endpoint_id_w, eRender);
+    HSTRING hsTarget = nullptr;
+    HRESULT hrStr = pWindowsCreateString(full_dev_id.c_str(), static_cast<UINT32>(full_dev_id.length()), &hsTarget);
+    if (FAILED(hrStr)) {
+        AT_LOG_ERROR("COM/POLICY", "WindowsCreateString failed for '%s': hr=0x%08X",
+                     utf8_encode(full_dev_id).c_str(), hrStr);
+        return false;
+    }
+
+    AT_LOG_DEBUG("COM/POLICY", "Calling AudioPolicyConfig Slot[25] SetPersistedDefaultAudioEndpoint(PID=%u, device='%s')",
+                 pid, full_dev_id.empty() ? "[System Default]" : utf8_encode(full_dev_id).c_str());
+
+    void** vtable = *reinterpret_cast<void***>(audio_policy_factory_);
+    // Virtual Method Table Slot 25: SetPersistedDefaultAudioEndpoint(pid, flow, role, hsDevice)
+    typedef HRESULT (STDMETHODCALLTYPE *pfnSetPersisted)(void*, uint32_t, uint32_t, uint32_t, HSTRING);
+    auto fnSetPersisted = reinterpret_cast<pfnSetPersisted>(vtable[25]);
+
+    // Route for both eConsole (0) and eMultimedia (1) roles
+    HRESULT hr1 = fnSetPersisted(audio_policy_factory_, pid, eRender, eConsole, hsTarget);
+    HRESULT hr2 = fnSetPersisted(audio_policy_factory_, pid, eRender, eMultimedia, hsTarget);
+
+    pWindowsDeleteString(hsTarget);
 
     if (FAILED(hr1) && FAILED(hr2)) {
         AT_LOG_WARN("COM/POLICY", "SetPersistedDefaultAudioEndpoint failed for PID=%u (eConsole: 0x%08X, eMultimedia: 0x%08X)",
@@ -198,6 +248,41 @@ bool AppAudioRouter::set_persisted_endpoint(uint32_t pid, const std::wstring& en
     AT_LOG_INFO("COM/POLICY", "Successfully set audio endpoint for PID %u (eConsole: 0x%08X, eMultimedia: 0x%08X)",
                 pid, hr1, hr2);
     return true;
+}
+
+std::string AppAudioRouter::get_persisted_endpoint(uint32_t pid) {
+    if (!init_com_factory() || !audio_policy_factory_) return "";
+
+    void** vtable = *reinterpret_cast<void***>(audio_policy_factory_);
+    // Virtual Method Table Slot 26: GetPersistedDefaultAudioEndpoint(pid, flow, role, HSTRING*)
+    typedef HRESULT (STDMETHODCALLTYPE *pfnGetPersisted)(void*, uint32_t, uint32_t, uint32_t, HSTRING*);
+    auto fnGetPersisted = reinterpret_cast<pfnGetPersisted>(vtable[26]);
+
+    HMODULE hComBase = GetModuleHandleW(L"combase.dll");
+    if (!hComBase) hComBase = LoadLibraryW(L"combase.dll");
+    typedef HRESULT (WINAPI *pfnWindowsDeleteString)(HSTRING);
+    typedef PCWSTR (WINAPI *pfnWindowsGetStringRawBuffer)(HSTRING, UINT32*);
+    auto pWindowsDeleteString = reinterpret_cast<pfnWindowsDeleteString>(GetProcAddress(hComBase, "WindowsDeleteString"));
+    auto pWindowsGetStringRawBuffer = reinterpret_cast<pfnWindowsGetStringRawBuffer>(GetProcAddress(hComBase, "WindowsGetStringRawBuffer"));
+
+    if (!pWindowsDeleteString || !pWindowsGetStringRawBuffer) return "";
+
+    HSTRING hsResult = nullptr;
+    HRESULT hr = fnGetPersisted(audio_policy_factory_, pid, eRender, eMultimedia, &hsResult);
+    if (FAILED(hr) || !hsResult) {
+        hr = fnGetPersisted(audio_policy_factory_, pid, eRender, eConsole, &hsResult);
+    }
+
+    if (SUCCEEDED(hr) && hsResult) {
+        UINT32 len = 0;
+        PCWSTR raw = pWindowsGetStringRawBuffer(hsResult, &len);
+        std::wstring full_w = (raw && len > 0) ? std::wstring(raw, len) : L"";
+        pWindowsDeleteString(hsResult);
+        if (!full_w.empty()) {
+            return extract_endpoint_id_from_full(full_w);
+        }
+    }
+    return "";
 }
 
 std::vector<AudioAppSession> AppAudioRouter::enumerate_apps(const std::vector<AudioDeviceInfo>& available_devices) {
@@ -302,8 +387,18 @@ std::vector<AudioAppSession> AppAudioRouter::enumerate_apps(const std::vector<Au
                             }
                         }
 
+                        std::string persisted_id = (pid != 0) ? get_persisted_endpoint(pid) : "";
+                        std::string active_device_id = !persisted_id.empty() ? persisted_id : devId;
+                        std::string active_device_name = friendlyName;
+                        if (!persisted_id.empty()) {
+                            auto eit = endpoint_to_name.find(persisted_id);
+                            if (eit != endpoint_to_name.end()) {
+                                active_device_name = eit->second;
+                            }
+                        }
+
                         // Capture original configuration if not already seen
-                        capture_original_if_missing(procName, devId);
+                        capture_original_if_missing(procName, active_device_id);
 
                         // Group or update application session
                         auto pit = process_to_index.find(procName);
@@ -312,15 +407,15 @@ std::vector<AudioAppSession> AppAudioRouter::enumerate_apps(const std::vector<Au
                             auto& existing = result[pit->second];
                             if (existing.pid == 0 && pid != 0) existing.pid = pid;
                             if (existing.display_name.empty() && !dispName.empty()) existing.display_name = dispName;
-                            existing.current_device_id = devId;
-                            existing.current_device_name = friendlyName;
+                            existing.current_device_id = active_device_id;
+                            existing.current_device_name = active_device_name;
                         } else {
                             AudioAppSession app;
                             app.pid = pid;
                             app.process_name = procName;
                             app.display_name = dispName.empty() ? procName : dispName;
-                            app.current_device_id = devId;
-                            app.current_device_name = friendlyName;
+                            app.current_device_id = active_device_id;
+                            app.current_device_name = active_device_name;
                             app.is_system_sound = isSys;
 
                             process_to_index[procName] = result.size();

@@ -64,6 +64,7 @@ target_link_libraries(at_engine PUBLIC
     advapi32
     shell32
     uuid
+    dbghelp
 )
 
 # ----------------------------------------------------------------------------

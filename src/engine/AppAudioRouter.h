@@ -74,6 +74,7 @@ private:
     bool init_com_factory();
     void release_com_factory();
     bool set_persisted_endpoint(uint32_t pid, const std::wstring& endpoint_id_w);
+    std::string get_persisted_endpoint(uint32_t pid);
 
     mutable std::mutex                  router_mutex_;
     std::map<std::string, std::string>  original_routing_;
